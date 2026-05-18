@@ -2,6 +2,7 @@ import { ConfigifyModule } from '@itgorillaz/configify';
 import { Module } from '@nestjs/common';
 import { PgModule, RedisModule } from '@app/common';
 import { AppConfiguration } from './app.configuration';
+import { HealthController } from './health.controller';
 import { PaymentsController } from './payments.controller';
 import { PaymentsService } from './payments.service';
 
@@ -19,7 +20,7 @@ import { PaymentsService } from './payments.service';
       useFactory: (cfg: AppConfiguration) => ({ url: cfg.redisUrl }),
     }),
   ],
-  controllers: [PaymentsController],
+  controllers: [HealthController, PaymentsController],
   providers: [PaymentsService],
 })
 export class PaymentsModule {}

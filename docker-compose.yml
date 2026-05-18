@@ -13,10 +13,11 @@ services:
       - pgdata:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -h 127.0.0.1"]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 20
+      start_period: 30s
 
   redis:
     image: redis:7-alpine
@@ -32,7 +33,7 @@ services:
       retries: 10
 
   kafka:
-    image: bitnami/kafka:3.7
+    image: bitnamilegacy/kafka:3.7
     container_name: ecommerce-kafka
     ports:
       - "127.0.0.1:9092:9092"

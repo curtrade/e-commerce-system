@@ -10,6 +10,7 @@ import {
 import { AppConfiguration } from './app.configuration';
 import { InventoryClient } from './clients/inventory.client';
 import { PaymentsClient } from './clients/payments.client';
+import { HealthController } from './health.controller';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
 import { OutboxPublisher } from './outbox.publisher';
@@ -31,7 +32,7 @@ import { SagaRecoveryService } from './saga-recovery.service';
       useFactory: (cfg: AppConfiguration) => ({ url: cfg.redisUrl }),
     }),
   ],
-  controllers: [OrdersController],
+  controllers: [HealthController, OrdersController],
   providers: [
     OrdersService,
     InventoryClient,

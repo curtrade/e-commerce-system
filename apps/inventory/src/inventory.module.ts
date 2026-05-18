@@ -8,6 +8,7 @@ import {
   ORDERS_TOPIC,
 } from '@app/common';
 import { AppConfiguration } from './app.configuration';
+import { HealthController } from './health.controller';
 import { InventoryConsumer } from './inventory.consumer';
 import { InventoryController } from './inventory.controller';
 import { InventoryReaper } from './inventory.reaper';
@@ -28,7 +29,7 @@ import { InventoryService } from './inventory.service';
       useFactory: (cfg: AppConfiguration) => ({ url: cfg.redisUrl }),
     }),
   ],
-  controllers: [InventoryController],
+  controllers: [HealthController, InventoryController],
   providers: [
     InventoryService,
     InventoryConsumer,
