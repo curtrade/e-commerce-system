@@ -1,98 +1,89 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# e-commerce-system
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Учебная имплементация саги «заказ → резерв → оплата → подтверждение» из дизайн-документа
+[curtrade/system-design/e-commerce-system](https://github.com/curtrade/system-design/tree/main/e-commerce-system).
+NestJS-монорепо из четырёх сервисов на одной Postgres / Redis / Kafka.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## Сервисы
 
-## Description
+| Сервис | Порт | Роль |
+|---|---|---|
+| `orders` | 3001 | Saga-оркестратор: создаёт заказ, синхронно дергает inventory и payments, пишет outbox |
+| `inventory` | 3003 | Резерв/release/commit стока с TTL, потребляет события заказа |
+| `payments` | 3002 | Идемпотентный charge/refund, симуляция отказа через `FAILURE_RATE` |
+| `notifications` | 3004 | Kafka-консьюмер, пишет уведомления в БД (email-провайдер не подключён) |
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+Общая инфра: `postgres:5432`, `redis:6379`, `kafka:9092`, `kafka-ui:8080`.
+В одном инстансе Postgres создаются 4 базы (`init-db.sql`), Redis разделён по DB 0–3.
 
-## Project setup
+## Шина
 
-```bash
-$ npm install
+Все события идут одним топиком `orders.events` в общем конверте:
+
+```ts
+{ eventId, eventType, occurredAt, traceId, payload }
 ```
 
-## Compile and run the project
+Типы: `OrderConfirmed`, `OrderFailed` (`OrderFulfilled` / `OrderRefunded` зарезервированы).
 
-```bash
-# development
-$ npm run start
+## Saga happy-path
 
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+```
+POST /orders
+ └─ orders: INSERT order(PENDING)
+ └─ HTTP  inventory.reserve(ttl=900s)   ── Idempotency-Key: <orderId>:<attemptId>
+ └─ HTTP  payments.charge               ── тот же ключ
+ └─ tx:   UPDATE order=CONFIRMED + INSERT orders_outbox(OrderConfirmed)
+ └─ outbox publisher (SELECT … FOR UPDATE SKIP LOCKED, poll 1s) → Kafka
+         ├─ inventory.consumer  → commit reservation
+         └─ notifications.consumer → запись в notifications
 ```
 
-## Run tests
+## Компенсации (три слоя)
+
+1. **Explicit release** — `orders` синхронно вызывает `inventory.release` при провале payments.
+2. **Outbox `OrderFailed`** — атомарно с переводом заказа в `FAILED_*`; consumer inventory сделает release повторно (idempotent по reservationId).
+3. **Reaper TTL** — `inventory.reaper` каждые 30 с релизит `PENDING` с истёкшим `expires_at`.
+
+Плюс `saga-recovery` в `orders`: раз в 15 с переводит `PENDING` старше `SAGA_TIMEOUT_SEC` (60 с) в `FAILED_TIMEOUT` с событием `OrderFailed`.
+
+## Идемпотентность
+
+- HTTP-эндпоинты `inventory.reserve` и `payments.charge` требуют заголовок `Idempotency-Key`.
+- В `orders` ключ = `${orderId}:${attemptId}`.
+- `payments` хранит ключ в БД (`UNIQUE`) и в Redis (`pay:idem:*`, TTL 24 ч).
+- `inventory` кэширует результат reserve в Redis (`inv:idem:*`, TTL 24 ч).
+- Kafka-консьюмеры дедуплицируют по `eventId` через `redis.claimIdempotency` (TTL 7 дней).
+
+## Запуск
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+docker compose up -d --build
+# health
+curl :3001/health :3002/health :3003/health :3004/health
+# happy-path (каталог уже заполнен SKU-RED-SHIRT-M / SKU-BLUE-MUG / SKU-NOTEBOOK-A5)
+curl -X POST :3001/orders -H 'content-type: application/json' -d '{
+  "customerId":"c1","email":"a@b.c",
+  "items":[{"sku":"SKU-BLUE-MUG","qty":2,"unitPrice":7.5}]
+}'
 ```
 
-## Deployment
+Dev-режим (без контейнеров) — поднять Postgres/Redis/Kafka локально и `npm run start:<service>`.
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+## Расхождения с дизайн-документом
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+- Межсервисный RPC реализован как **HTTP**, а не gRPC.
+- Notifications **не отправляет реальные письма** — только лог и запись в БД.
+- Один Postgres-инстанс с базой на сервис вместо отдельных инстансов (логически DB-per-service сохранён).
+- Все события публикуются в один топик `orders.events`; `StockChanged` и фоновые проекции не реализованы.
+- Refund-flow при системном долге описан в дизайне, но не автоматизирован.
 
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+## Структура
+
 ```
-
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
-
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+apps/{orders,payments,inventory,notifications}/src   — сервисы (controller, service, consumer, …)
+libs/common/src/{db,redis,kafka,events}              — общие клиенты и контракты
+scripts/init-db.sql                                  — схема всех 4 БД + сидинг каталога
+Dockerfile                                           — мульти-стейдж, параметризуется SERVICE arg
+docker-compose.yml                                   — инфра + 4 сервиса
+```
