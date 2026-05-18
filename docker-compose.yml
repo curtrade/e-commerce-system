@@ -1,0 +1,155 @@
+name: ecommerce
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ecommerce-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: ecommerce-redis
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  kafka:
+    image: bitnami/kafka:3.7
+    container_name: ecommerce-kafka
+    ports:
+      - "127.0.0.1:9092:9092"
+    environment:
+      # KRaft single-node setup — no Zookeeper.
+      KAFKA_CFG_NODE_ID: 1
+      KAFKA_CFG_PROCESS_ROLES: "controller,broker"
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_CFG_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
+      KAFKA_CFG_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092"
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+    volumes:
+      - kafkadata:/bitnami/kafka
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/bitnami/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server kafka:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: ecommerce-kafka-ui
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  orders:
+    build:
+      context: .
+      args:
+        SERVICE: orders
+    container_name: ecommerce-orders
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/orders
+      KAFKA_BROKERS: kafka:9092
+      REDIS_URL: redis://redis:6379/0
+      INVENTORY_URL: http://inventory:3000
+      PAYMENTS_URL: http://payments:3000
+      RESERVATION_TTL_SEC: "900"
+      SAGA_TIMEOUT_SEC: "60"
+    ports:
+      - "127.0.0.1:3001:3000"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+      kafka:    { condition: service_healthy }
+    restart: unless-stopped
+
+  payments:
+    build:
+      context: .
+      args:
+        SERVICE: payments
+    container_name: ecommerce-payments
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/payments
+      REDIS_URL: redis://redis:6379/2
+      FAILURE_RATE: "0"
+    ports:
+      - "127.0.0.1:3002:3000"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+    restart: unless-stopped
+
+  inventory:
+    build:
+      context: .
+      args:
+        SERVICE: inventory
+    container_name: ecommerce-inventory
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/inventory
+      KAFKA_BROKERS: kafka:9092
+      REDIS_URL: redis://redis:6379/1
+    ports:
+      - "127.0.0.1:3003:3000"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+      kafka:    { condition: service_healthy }
+    restart: unless-stopped
+
+  notifications:
+    build:
+      context: .
+      args:
+        SERVICE: notifications
+    container_name: ecommerce-notifications
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/notifications
+      KAFKA_BROKERS: kafka:9092
+      REDIS_URL: redis://redis:6379/3
+      SENDER_EMAIL: ops@example.com
+    ports:
+      - "127.0.0.1:3004:3000"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+      kafka:    { condition: service_healthy }
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  kafkadata:
