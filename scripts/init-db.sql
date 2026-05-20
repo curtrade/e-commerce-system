@@ -34,6 +34,7 @@ CREATE TABLE orders_outbox (
     topic           text        NOT NULL,
     event_type      text        NOT NULL,
     payload         jsonb       NOT NULL,
+    trace_id        text,
     attempts        int         NOT NULL DEFAULT 0,
     created_at      timestamptz NOT NULL DEFAULT NOW(),
     published_at    timestamptz

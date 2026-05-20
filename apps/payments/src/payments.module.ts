@@ -1,6 +1,6 @@
 import { ConfigifyModule } from '@itgorillaz/configify';
 import { Module } from '@nestjs/common';
-import { PgModule, RedisModule } from '@app/common';
+import { PgModule, RedisModule, SharedClsModule } from '@app/common';
 import { AppConfiguration } from './app.configuration';
 import { HealthController } from './health.controller';
 import { PaymentsController } from './payments.controller';
@@ -8,6 +8,7 @@ import { PaymentsService } from './payments.service';
 
 @Module({
   imports: [
+    SharedClsModule,
     ConfigifyModule.forRootAsync(),
     PgModule.forRootAsync({
       inject: [AppConfiguration],

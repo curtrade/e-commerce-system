@@ -5,6 +5,8 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { Kafka, Producer } from 'kafkajs';
+import { ClsService } from 'nestjs-cls';
+import { TraceStore } from '../als/cls-store';
 
 export interface KafkaProducerConfig {
   clientId: string;
@@ -19,7 +21,10 @@ export class KafkaProducerService
   private kafka!: Kafka;
   private producer!: Producer;
 
-  constructor(private readonly config: KafkaProducerConfig) {}
+  constructor(
+    private readonly config: KafkaProducerConfig,
+    private readonly cls: ClsService<TraceStore>,
+  ) {}
 
   async onModuleInit(): Promise<void> {
     this.kafka = new Kafka({
@@ -39,12 +44,24 @@ export class KafkaProducerService
   }
 
   async send(topic: string, key: string, value: unknown): Promise<void> {
+    let payload = value;
+    if (
+      payload &&
+      typeof payload === 'object' &&
+      'eventId' in (payload as Record<string, unknown>) &&
+      !(payload as Record<string, unknown>).traceId
+    ) {
+      const traceId = this.cls.isActive() ? this.cls.get('traceId') : undefined;
+      if (traceId) {
+        payload = { ...(payload as Record<string, unknown>), traceId };
+      }
+    }
     await this.producer.send({
       topic,
       messages: [
         {
           key,
-          value: JSON.stringify(value),
+          value: JSON.stringify(payload),
         },
       ],
     });

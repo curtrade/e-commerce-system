@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { PgService } from '@app/common';
+import { ClsService, PgService, TraceStore } from '@app/common';
 import {
   ORDERS_TOPIC,
   OrderConfirmedPayload,
@@ -43,6 +43,7 @@ export class OrdersService {
     private readonly inventory: InventoryClient,
     private readonly payments: PaymentsClient,
     private readonly cfg: AppConfiguration,
+    private readonly cls: ClsService<TraceStore>,
   ) {}
 
   async createOrder(dto: CreateOrderDto) {
@@ -122,14 +123,15 @@ export class OrdersService {
       };
 
       await client.query(
-        `INSERT INTO orders_outbox (id, aggregate_id, topic, event_type, payload)
-         VALUES ($1, $2, $3, $4, $5::jsonb)`,
+        `INSERT INTO orders_outbox (id, aggregate_id, topic, event_type, payload, trace_id)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6)`,
         [
           randomUUID(),
           orderId,
           ORDERS_TOPIC,
           'OrderConfirmed',
           JSON.stringify(payload),
+          this.cls.get('traceId') ?? null,
         ],
       );
     });
@@ -166,14 +168,15 @@ export class OrdersService {
         reason,
       };
       await client.query(
-        `INSERT INTO orders_outbox (id, aggregate_id, topic, event_type, payload)
-         VALUES ($1, $2, $3, $4, $5::jsonb)`,
+        `INSERT INTO orders_outbox (id, aggregate_id, topic, event_type, payload, trace_id)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6)`,
         [
           randomUUID(),
           orderId,
           ORDERS_TOPIC,
           'OrderFailed',
           JSON.stringify(payload),
+          this.cls.isActive() ? this.cls.get('traceId') : null,
         ],
       );
     });

@@ -1,7 +1,13 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { randomUUID } from 'crypto';
-import { KafkaProducerService, PgService, EventEnvelope } from '@app/common';
+import {
+  ClsService,
+  EventEnvelope,
+  KafkaProducerService,
+  PgService,
+  TraceStore,
+} from '@app/common';
 
 interface OutboxRow {
   id: string;
@@ -9,6 +15,7 @@ interface OutboxRow {
   topic: string;
   event_type: string;
   payload: Record<string, unknown>;
+  trace_id: string | null;
   attempts: number;
 }
 
@@ -23,6 +30,7 @@ export class OutboxPublisher implements OnModuleInit {
     private readonly pg: PgService,
     private readonly producer: KafkaProducerService,
     private readonly scheduler: SchedulerRegistry,
+    private readonly cls: ClsService<TraceStore>,
   ) {}
 
   onModuleInit(): void {
@@ -38,7 +46,7 @@ export class OutboxPublisher implements OnModuleInit {
     try {
       // SKIP LOCKED ⇒ multiple replicas can poll without stepping on each other.
       const { rows } = await this.pg.query<OutboxRow>(
-        `SELECT id, aggregate_id, topic, event_type, payload, attempts
+        `SELECT id, aggregate_id, topic, event_type, payload, trace_id, attempts
            FROM orders_outbox
           WHERE published_at IS NULL
           ORDER BY created_at
@@ -46,33 +54,40 @@ export class OutboxPublisher implements OnModuleInit {
           FOR UPDATE SKIP LOCKED`,
       );
       for (const row of rows) {
-        const envelope: EventEnvelope = {
-          eventId: row.id,
-          eventType: row.event_type,
-          occurredAt: new Date().toISOString(),
-          traceId: randomUUID(),
-          payload: row.payload,
-        };
-        try {
-          await this.producer.send(row.topic, row.aggregate_id, envelope);
-          await this.pg.query(
-            `UPDATE orders_outbox SET published_at = NOW() WHERE id = $1`,
-            [row.id],
-          );
-        } catch (err) {
-          this.logger.error(
-            `Failed to publish outbox row ${row.id}: ${(err as Error).message}`,
-          );
-          await this.pg.query(
-            `UPDATE orders_outbox SET attempts = attempts + 1 WHERE id = $1`,
-            [row.id],
-          );
-        }
+        const traceId = row.trace_id ?? randomUUID();
+        await this.cls.runWith({ traceId }, () =>
+          this.publishRow(row, traceId),
+        );
       }
     } catch (err) {
       this.logger.error(`Outbox tick failed: ${(err as Error).message}`);
     } finally {
       this.running = false;
+    }
+  }
+
+  private async publishRow(row: OutboxRow, traceId: string): Promise<void> {
+    const envelope: EventEnvelope = {
+      eventId: row.id,
+      eventType: row.event_type,
+      occurredAt: new Date().toISOString(),
+      traceId,
+      payload: row.payload,
+    };
+    try {
+      await this.producer.send(row.topic, row.aggregate_id, envelope);
+      await this.pg.query(
+        `UPDATE orders_outbox SET published_at = NOW() WHERE id = $1`,
+        [row.id],
+      );
+    } catch (err) {
+      this.logger.error(
+        `Failed to publish outbox row ${row.id}: ${(err as Error).message}`,
+      );
+      await this.pg.query(
+        `UPDATE orders_outbox SET attempts = attempts + 1 WHERE id = $1`,
+        [row.id],
+      );
     }
   }
 }

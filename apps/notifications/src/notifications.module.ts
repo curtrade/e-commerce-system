@@ -1,10 +1,13 @@
 import { ConfigifyModule } from '@itgorillaz/configify';
 import { Module } from '@nestjs/common';
+import { ClsService } from 'nestjs-cls';
 import {
   KafkaConsumerService,
   ORDERS_TOPIC,
   PgModule,
   RedisModule,
+  SharedClsModule,
+  TraceStore,
 } from '@app/common';
 import { AppConfiguration } from './app.configuration';
 import { HealthController } from './notifications.controller';
@@ -13,6 +16,7 @@ import { NotificationsService } from './notifications.service';
 
 @Module({
   imports: [
+    SharedClsModule,
     ConfigifyModule.forRootAsync(),
     PgModule.forRootAsync({
       inject: [AppConfiguration],
@@ -31,14 +35,17 @@ import { NotificationsService } from './notifications.service';
     NotificationsConsumer,
     {
       provide: KafkaConsumerService,
-      inject: [AppConfiguration],
-      useFactory: (cfg: AppConfiguration) =>
-        new KafkaConsumerService({
-          clientId: 'notifications',
-          brokers: cfg.kafkaBrokers.split(',').map((b) => b.trim()),
-          groupId: 'notifications-orders',
-          topics: [ORDERS_TOPIC],
-        }),
+      inject: [AppConfiguration, ClsService],
+      useFactory: (cfg: AppConfiguration, cls: ClsService<TraceStore>) =>
+        new KafkaConsumerService(
+          {
+            clientId: 'notifications',
+            brokers: cfg.kafkaBrokers.split(',').map((b) => b.trim()),
+            groupId: 'notifications-orders',
+            topics: [ORDERS_TOPIC],
+          },
+          cls,
+        ),
     },
   ],
 })
