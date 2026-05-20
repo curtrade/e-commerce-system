@@ -1,14 +1,21 @@
-import { DynamicModule, Module } from '@nestjs/common';
-import { RedisConfig, RedisService } from './redis.service';
+import type { DynamicModule } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 
-export interface RedisModuleAsyncOptions {
-  inject: unknown[];
-  useFactory: (...args: unknown[]) => RedisConfig | Promise<RedisConfig>;
+import type { RedisConfig } from './redis.service';
+import { RedisService } from './redis.service';
+
+export interface RedisModuleAsyncOptions<
+  TDeps extends readonly unknown[] = readonly unknown[],
+> {
+  inject: readonly unknown[];
+  useFactory: (...args: TDeps) => RedisConfig | Promise<RedisConfig>;
 }
 
 @Module({})
 export class RedisModule {
-  static forRootAsync(options: RedisModuleAsyncOptions): DynamicModule {
+  static forRootAsync<TDeps extends readonly unknown[]>(
+    options: RedisModuleAsyncOptions<TDeps>,
+  ): DynamicModule {
     return {
       module: RedisModule,
       global: true,
@@ -17,7 +24,7 @@ export class RedisModule {
           provide: RedisService,
           inject: options.inject as never,
           useFactory: async (...args: unknown[]) => {
-            const cfg = await options.useFactory(...args);
+            const cfg = await options.useFactory(...(args as unknown as TDeps));
             return new RedisService(cfg);
           },
         },
