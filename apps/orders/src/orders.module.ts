@@ -1,9 +1,7 @@
-import { Module } from '@nestjs/common';
-
 import { ConfigifyModule } from '@itgorillaz/configify';
 import { HttpModule } from '@nestjs/axios';
+import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
-import { ClsService, ClsStore } from 'nestjs-cls';
 import {
   KafkaProducerService,
   PgModule,
@@ -45,15 +43,12 @@ import { SagaRecoveryService } from './saga-recovery.service';
     SagaRecoveryService,
     {
       provide: KafkaProducerService,
-      inject: [AppConfiguration, ClsService],
-      useFactory: (cfg: AppConfiguration, cls: ClsService<ClsStore>) =>
-        new KafkaProducerService(
-          {
-            clientId: 'orders',
-            brokers: cfg.kafkaBrokers.split(',').map((b) => b.trim()),
-          },
-          cls,
-        ),
+      inject: [AppConfiguration],
+      useFactory: (cfg: AppConfiguration) =>
+        new KafkaProducerService({
+          clientId: 'orders',
+          brokers: cfg.kafkaBrokers.split(',').map((b) => b.trim()),
+        }),
     },
   ],
 })

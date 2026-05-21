@@ -132,7 +132,7 @@ export class OrdersService {
           ORDERS_TOPIC,
           'OrderConfirmed',
           JSON.stringify(payload),
-          this.cls.get('traceId') ?? null,
+          this.currentTraceId(),
         ],
       );
     });
@@ -177,10 +177,14 @@ export class OrdersService {
           ORDERS_TOPIC,
           'OrderFailed',
           JSON.stringify(payload),
-          this.cls.isActive() ? this.cls.get('traceId') : null,
+          this.currentTraceId(),
         ],
       );
     });
+  }
+
+  private currentTraceId(): string | null {
+    return this.cls.isActive() ? this.cls.get('traceId') ?? null : null;
   }
 
   async getOrder(orderId: string) {

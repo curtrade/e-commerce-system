@@ -53,10 +53,9 @@ export class OutboxPublisher implements OnModuleInit {
           FOR UPDATE SKIP LOCKED`,
       );
       for (const row of rows) {
-        const traceId = row.trace_id ?? randomUUID();
         await this.cls.run(() => {
-          this.cls.set('traceId', traceId);
-          return this.publishRow(row, traceId);
+          this.cls.set('traceId', row.trace_id ?? randomUUID());
+          return this.publishRow(row);
         });
       }
     } catch (err) {
@@ -66,12 +65,12 @@ export class OutboxPublisher implements OnModuleInit {
     }
   }
 
-  private async publishRow(row: OutboxRow, traceId: string): Promise<void> {
+  private async publishRow(row: OutboxRow): Promise<void> {
     const envelope: EventEnvelope = {
       eventId: row.id,
       eventType: row.event_type,
       occurredAt: new Date().toISOString(),
-      traceId,
+      traceId: this.cls.get('traceId'),
       payload: row.payload,
     };
     try {

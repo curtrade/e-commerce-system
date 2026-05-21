@@ -11,7 +11,7 @@ import { ChargeDto, RefundDto } from './dto/charge.dto';
 
 const IDEMPOTENCY_TTL_SEC = 24 * 60 * 60;
 
-export interface PaymentRow {
+interface PaymentRow {
   id: string;
   order_id: string;
   amount: string;

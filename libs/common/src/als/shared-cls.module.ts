@@ -6,9 +6,11 @@ import { ClsModule, ClsService, ClsStore } from 'nestjs-cls';
 @Module({
   imports: [
     ClsModule.forRoot({
-      global: true,                // ClsService доступен везде без импорта модуля
+      global: true,
       middleware: {
-        mount: true,               // автоматически вешает middleware на все роуты
+        // mount=true вешает middleware на все HTTP-роуты.
+        // Для Kafka-консьюмеров CLS-контекст поднимается вручную в KafkaConsumerService.
+        mount: true,
         generateId: true,
         idGenerator: (req: Request) => {
           const header = req.headers['x-trace-id'];
@@ -21,6 +23,8 @@ import { ClsModule, ClsService, ClsStore } from 'nestjs-cls';
       },
     }),
   ],
+  // ClsModule помечен global: true — экспорт нужен только чтобы потребители
+  // могли подключить SharedClsModule в imports и тем самым активировать middleware.
   exports: [ClsModule],
 })
 export class SharedClsModule {}
