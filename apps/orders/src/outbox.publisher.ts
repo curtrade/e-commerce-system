@@ -1,7 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { SchedulerRegistry } from '@nestjs/schedule';
-import { randomUUID } from 'crypto';
-import { ClsService, ClsStore } from 'nestjs-cls';
 import {
   EventEnvelope,
   KafkaProducerService,
@@ -15,7 +13,6 @@ interface OutboxRow {
   topic: string;
   event_type: string;
   payload: Record<string, unknown>;
-  trace_id: string | null;
   attempts: number;
 }
 
@@ -30,7 +27,6 @@ export class OutboxPublisher implements OnModuleInit {
     private readonly pg: PgService,
     private readonly producer: KafkaProducerService,
     private readonly scheduler: SchedulerRegistry,
-    private readonly cls: ClsService<ClsStore>,
   ) {}
 
   onModuleInit(): void {
@@ -46,7 +42,7 @@ export class OutboxPublisher implements OnModuleInit {
     try {
       // SKIP LOCKED ⇒ multiple replicas can poll without stepping on each other.
       const { rows } = await this.pg.query<OutboxRow>(
-        `SELECT id, aggregate_id, topic, event_type, payload, trace_id, attempts
+        `SELECT id, aggregate_id, topic, event_type, payload, attempts
            FROM orders_outbox
           WHERE published_at IS NULL
           ORDER BY created_at
@@ -54,14 +50,11 @@ export class OutboxPublisher implements OnModuleInit {
           FOR UPDATE SKIP LOCKED`,
       );
       for (const row of rows) {
-        await this.cls.run(() =>
-          withSpan('orders-outbox', 'outbox.publish', async (span) => {
-            span.setAttribute('outbox.row.id', row.id);
-            span.setAttribute('outbox.event_type', row.event_type);
-            this.cls.set('traceId', row.trace_id ?? randomUUID());
-            return this.publishRow(row);
-          }),
-        );
+        await withSpan('orders-outbox', 'outbox.publish', async (span) => {
+          span.setAttribute('outbox.row.id', row.id);
+          span.setAttribute('outbox.event_type', row.event_type);
+          return this.publishRow(row);
+        });
       }
     } catch (err) {
       this.logger.error(`Outbox tick failed: ${(err as Error).message}`);
@@ -75,7 +68,6 @@ export class OutboxPublisher implements OnModuleInit {
       eventId: row.id,
       eventType: row.event_type,
       occurredAt: new Date().toISOString(),
-      traceId: this.cls.get('traceId'),
       payload: row.payload,
     };
     try {

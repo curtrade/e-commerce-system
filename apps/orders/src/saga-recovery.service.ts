@@ -1,7 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { SchedulerRegistry } from '@nestjs/schedule';
-import { randomUUID } from 'crypto';
-import { ClsService, ClsStore } from 'nestjs-cls';
 import { withSpan } from '@app/common';
 import { OrdersService } from './orders.service';
 
@@ -14,14 +12,14 @@ export class SagaRecoveryService implements OnModuleInit {
   constructor(
     private readonly orders: OrdersService,
     private readonly scheduler: SchedulerRegistry,
-    private readonly cls: ClsService<ClsStore>,
   ) {}
 
   onModuleInit(): void {
     const handle = setInterval(() => {
-      void this.cls.run(() =>
-        withSpan('orders-saga-recovery', 'saga.recovery.tick', async () => {
-          this.cls.set('traceId', randomUUID());
+      void withSpan(
+        'orders-saga-recovery',
+        'saga.recovery.tick',
+        async () => {
           try {
             const n = await this.orders.recoverStuckOrders();
             if (n > 0) this.logger.log(`Recovered ${n} stuck orders`);
@@ -30,7 +28,7 @@ export class SagaRecoveryService implements OnModuleInit {
               `Saga recovery failed: ${(err as Error).message}`,
             );
           }
-        }),
+        },
       );
     }, RECOVERY_INTERVAL_MS);
     this.scheduler.addInterval('orders-saga-recovery', handle);

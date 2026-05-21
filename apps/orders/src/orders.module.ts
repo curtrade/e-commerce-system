@@ -6,7 +6,6 @@ import {
   KafkaProducerService,
   PgModule,
   RedisModule,
-  SharedClsModule,
 } from '@app/common';
 import { AppConfiguration } from './app.configuration';
 import { InventoryClient } from './clients/inventory.client';
@@ -19,7 +18,6 @@ import { SagaRecoveryService } from './saga-recovery.service';
 
 @Module({
   imports: [
-    SharedClsModule,
     ConfigifyModule.forRootAsync(),
     ScheduleModule.forRoot(),
     HttpModule,
