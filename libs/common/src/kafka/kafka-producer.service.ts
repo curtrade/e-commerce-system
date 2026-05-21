@@ -5,8 +5,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { Kafka, Producer } from 'kafkajs';
-import { ClsService } from 'nestjs-cls';
-import { TraceStore } from '../als/cls-store';
+import { ClsService, ClsStore } from 'nestjs-cls';
 
 export interface KafkaProducerConfig {
   clientId: string;
@@ -23,7 +22,7 @@ export class KafkaProducerService
 
   constructor(
     private readonly config: KafkaProducerConfig,
-    private readonly cls: ClsService<TraceStore>,
+    private readonly cls: ClsService<ClsStore>,
   ) {}
 
   async onModuleInit(): Promise<void> {

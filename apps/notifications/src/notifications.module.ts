@@ -1,13 +1,12 @@
 import { ConfigifyModule } from '@itgorillaz/configify';
 import { Module } from '@nestjs/common';
-import { ClsService } from 'nestjs-cls';
+import { ClsService, ClsStore } from 'nestjs-cls';
 import {
   KafkaConsumerService,
   ORDERS_TOPIC,
   PgModule,
   RedisModule,
   SharedClsModule,
-  TraceStore,
 } from '@app/common';
 import { AppConfiguration } from './app.configuration';
 import { HealthController } from './notifications.controller';
@@ -36,7 +35,7 @@ import { NotificationsService } from './notifications.service';
     {
       provide: KafkaConsumerService,
       inject: [AppConfiguration, ClsService],
-      useFactory: (cfg: AppConfiguration, cls: ClsService<TraceStore>) =>
+      useFactory: (cfg: AppConfiguration, cls: ClsService<ClsStore>) =>
         new KafkaConsumerService(
           {
             clientId: 'notifications',

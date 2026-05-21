@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { randomUUID } from 'crypto';
-import { ClsService, TraceStore } from '@app/common';
+import { ClsService, ClsStore } from 'nestjs-cls';
 import { OrdersService } from './orders.service';
 
 const RECOVERY_INTERVAL_MS = 15_000;
@@ -13,12 +13,13 @@ export class SagaRecoveryService implements OnModuleInit {
   constructor(
     private readonly orders: OrdersService,
     private readonly scheduler: SchedulerRegistry,
-    private readonly cls: ClsService<TraceStore>,
+    private readonly cls: ClsService<ClsStore>,
   ) {}
 
   onModuleInit(): void {
     const handle = setInterval(() => {
-      void this.cls.runWith({ traceId: randomUUID() }, async () => {
+      void this.cls.run(async () => {
+        this.cls.set('traceId', randomUUID());
         try {
           const n = await this.orders.recoverStuckOrders();
           if (n > 0) this.logger.log(`Recovered ${n} stuck orders`);

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { ClsService, PgService, TraceStore } from '@app/common';
+import { ClsService, ClsStore } from 'nestjs-cls';
+import { PgService } from '@app/common';
 import {
   ORDERS_TOPIC,
   OrderConfirmedPayload,
@@ -43,7 +44,7 @@ export class OrdersService {
     private readonly inventory: InventoryClient,
     private readonly payments: PaymentsClient,
     private readonly cfg: AppConfiguration,
-    private readonly cls: ClsService<TraceStore>,
+    private readonly cls: ClsService<ClsStore>,
   ) {}
 
   async createOrder(dto: CreateOrderDto) {

@@ -6,9 +6,8 @@ import {
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { Consumer, EachMessagePayload, Kafka } from 'kafkajs';
-import { ClsService } from 'nestjs-cls';
+import { ClsService, ClsStore } from 'nestjs-cls';
 import { EventEnvelope } from '../events/event-envelope';
-import { TraceStore } from '../als/cls-store';
 
 export interface KafkaConsumerConfig {
   clientId: string;
@@ -33,7 +32,7 @@ export class KafkaConsumerService
 
   constructor(
     private readonly config: KafkaConsumerConfig,
-    private readonly cls: ClsService<TraceStore>,
+    private readonly cls: ClsService<ClsStore>,
   ) {}
 
   registerHandler(handler: EnvelopeHandler): void {
@@ -62,9 +61,10 @@ export class KafkaConsumerService
         try {
           const envelope = JSON.parse(raw) as EventEnvelope;
           const traceId = envelope.traceId ?? randomUUID();
-          await this.cls.runWith({ traceId }, () =>
-            this.handler!(envelope, payload),
-          );
+          await this.cls.run(() => {
+            this.cls.set('traceId', traceId);
+            return this.handler!(envelope, payload);
+          });
         } catch (err) {
           this.logger.error(
             `Failed to handle message from ${payload.topic}: ${(err as Error).message}`,

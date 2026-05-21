@@ -3,13 +3,12 @@ import { Module } from '@nestjs/common';
 import { ConfigifyModule } from '@itgorillaz/configify';
 import { HttpModule } from '@nestjs/axios';
 import { ScheduleModule } from '@nestjs/schedule';
-import { ClsService } from 'nestjs-cls';
+import { ClsService, ClsStore } from 'nestjs-cls';
 import {
   KafkaProducerService,
   PgModule,
   RedisModule,
   SharedClsModule,
-  TraceStore,
 } from '@app/common';
 import { AppConfiguration } from './app.configuration';
 import { InventoryClient } from './clients/inventory.client';
@@ -47,7 +46,7 @@ import { SagaRecoveryService } from './saga-recovery.service';
     {
       provide: KafkaProducerService,
       inject: [AppConfiguration, ClsService],
-      useFactory: (cfg: AppConfiguration, cls: ClsService<TraceStore>) =>
+      useFactory: (cfg: AppConfiguration, cls: ClsService<ClsStore>) =>
         new KafkaProducerService(
           {
             clientId: 'orders',

@@ -1,12 +1,11 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { randomUUID } from 'crypto';
+import { ClsService, ClsStore } from 'nestjs-cls';
 import {
-  ClsService,
   EventEnvelope,
   KafkaProducerService,
   PgService,
-  TraceStore,
 } from '@app/common';
 
 interface OutboxRow {
@@ -30,7 +29,7 @@ export class OutboxPublisher implements OnModuleInit {
     private readonly pg: PgService,
     private readonly producer: KafkaProducerService,
     private readonly scheduler: SchedulerRegistry,
-    private readonly cls: ClsService<TraceStore>,
+    private readonly cls: ClsService<ClsStore>,
   ) {}
 
   onModuleInit(): void {
@@ -55,9 +54,10 @@ export class OutboxPublisher implements OnModuleInit {
       );
       for (const row of rows) {
         const traceId = row.trace_id ?? randomUUID();
-        await this.cls.runWith({ traceId }, () =>
-          this.publishRow(row, traceId),
-        );
+        await this.cls.run(() => {
+          this.cls.set('traceId', traceId);
+          return this.publishRow(row, traceId);
+        });
       }
     } catch (err) {
       this.logger.error(`Outbox tick failed: ${(err as Error).message}`);
