@@ -70,6 +70,20 @@ services:
       kafka:
         condition: service_healthy
 
+  orders-migrate:
+    build:
+      context: .
+      args:
+        SERVICE: orders
+    container_name: ecommerce-orders-migrate
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/orders
+    command:
+      ["node", "node_modules/node-pg-migrate/bin/node-pg-migrate.js", "up", "-m", "migrations/orders", "-j", "js"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
+
   orders:
     build:
       context: .
@@ -88,9 +102,10 @@ services:
     ports:
       - "127.0.0.1:3001:3000"
     depends_on:
-      postgres: { condition: service_healthy }
-      redis:    { condition: service_healthy }
-      kafka:    { condition: service_healthy }
+      postgres:       { condition: service_healthy }
+      redis:          { condition: service_healthy }
+      kafka:          { condition: service_healthy }
+      orders-migrate: { condition: service_completed_successfully }
     restart: unless-stopped
 
   payments:
