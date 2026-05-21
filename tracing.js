@@ -21,18 +21,30 @@ const sdk = new NodeSDK({
   traceExporter: new OTLPTraceExporter({ url: endpoint }),
   instrumentations: [
     getNodeAutoInstrumentations({
-      // fs шумит на каждый require/чтение — выключаем
+      // fs/net/dns шумят на каждый require/connect/lookup и дублируют сигнал,
+      // который уже даёт http/pg/ioredis/kafkajs — отключаем.
       '@opentelemetry/instrumentation-fs': { enabled: false },
+      '@opentelemetry/instrumentation-net': { enabled: false },
+      '@opentelemetry/instrumentation-dns': { enabled: false },
     }),
   ],
 });
 
 sdk.start();
 
-const shutdown = () => {
-  sdk.shutdown().catch(() => {
-    /* swallow — не блокируем SIGTERM */
-  });
+const shutdown = async () => {
+  try {
+    await sdk.shutdown();
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('OTEL shutdown failed', err);
+  } finally {
+    process.exit(0);
+  }
 };
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
+process.on('SIGTERM', () => {
+  void shutdown();
+});
+process.on('SIGINT', () => {
+  void shutdown();
+});

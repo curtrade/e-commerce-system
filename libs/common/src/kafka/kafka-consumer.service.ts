@@ -5,8 +5,10 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import { trace } from '@opentelemetry/api';
 import { Consumer, EachMessagePayload, Kafka } from 'kafkajs';
 import { ClsService, ClsStore } from 'nestjs-cls';
+import { TRACE_ID_KEY } from '../als/trace-context';
 import { EventEnvelope } from '../events/event-envelope';
 
 export interface KafkaConsumerConfig {
@@ -62,7 +64,8 @@ export class KafkaConsumerService
           const envelope = JSON.parse(raw) as EventEnvelope;
           const traceId = envelope.traceId ?? randomUUID();
           await this.cls.run(() => {
-            this.cls.set('traceId', traceId);
+            this.cls.set(TRACE_ID_KEY, traceId);
+            trace.getActiveSpan()?.setAttribute('app.trace_id', traceId);
             return this.handler!(envelope, payload);
           });
         } catch (err) {

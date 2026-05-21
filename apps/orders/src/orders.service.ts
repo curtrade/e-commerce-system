@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { ClsService, ClsStore } from 'nestjs-cls';
-import { PgService } from '@app/common';
+import { PgService, TRACE_ID_KEY } from '@app/common';
 import {
   ORDERS_TOPIC,
   OrderConfirmedPayload,
@@ -184,7 +184,7 @@ export class OrdersService {
   }
 
   private currentTraceId(): string | null {
-    return this.cls.isActive() ? this.cls.get('traceId') ?? null : null;
+    return this.cls.get(TRACE_ID_KEY) ?? null;
   }
 
   async getOrder(orderId: string) {
