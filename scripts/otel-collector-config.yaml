@@ -1,0 +1,29 @@
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  batch:
+
+exporters:
+  # Traces → Jaeger по OTLP HTTP (Jaeger 1.76 принимает на 4318/v1/traces).
+  otlphttp/jaeger:
+    endpoint: http://jaeger:4318
+  # Logs → Loki по нативному OTLP-приёмнику (Loki 3.x: /otlp/v1/logs).
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/jaeger]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/loki]

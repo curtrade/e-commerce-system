@@ -14,6 +14,7 @@ NestJS-монорепо из четырёх сервисов на одной Pos
 | `notifications` | 3004 | Kafka-консьюмер, пишет уведомления в БД (email-провайдер не подключён) |
 
 Общая инфра: `postgres:5432`, `redis:6379`, `kafka:9092`, `kafka-ui:8080`.
+Observability: `otel-collector:4318` (OTLP HTTP), `jaeger:16686` (трейсы), `loki:3100` (логи), `grafana:3000` (UI).
 В одном инстансе Postgres создаются 4 базы (`init-db.sql`), Redis разделён по DB 0–3.
 
 ## Шина
@@ -55,16 +56,21 @@ POST /orders
 - `inventory` кэширует результат reserve в Redis (`inv:idem:*`, TTL 24 ч).
 - Kafka-консьюмеры дедуплицируют по `eventId` через `redis.claimIdempotency` (TTL 7 дней).
 
-## Distributed tracing
+## Observability (traces + logs)
 
-OpenTelemetry, экспорт по OTLP/HTTP в Jaeger all-in-one (UI на `:16686`, OTLP на `:4318`).
+Сервисы шлют OTLP HTTP в **otel-collector**, который разводит сигналы: трейсы → Jaeger,
+логи → Loki. Grafana подцеплена к Loki и Jaeger через provisioning (`scripts/grafana-datasources.yaml`),
+auth выключен — UI открывается на `http://localhost:3000`.
 
-- **Инициализация**: `tracing.js` подгружается в каждый сервис через `NODE_OPTIONS=--require=/app/tracing.js` (см. `docker-compose.yml`). Внутри — `NodeSDK` + `getNodeAutoInstrumentations`; `fs`/`net`/`dns` отключены как шум.
-- **Auto-instrumentation**: HTTP (входящий и исходящий), `pg`, `ioredis`, `kafkajs`. Saga `orders → inventory → payments` собирается в одну трассу без ручных спанов: `traceparent` прорастает через HTTP-хедеры и Kafka message headers автоматически.
-- **Через outbox-границу руками**. Авто-пропагация рвётся, потому что между `INSERT outbox` и публикацией в Kafka сидит polling-цикл в другом таймере. Поэтому в транзакции `orders` мы сохраняем W3C `traceparent` в `orders_outbox.trace_context` через `captureTraceparent()` (`orders.service.ts:137,182`), а `OutboxPublisher` восстанавливает его как родителя спана `outbox.publish` через `withSpan(..., { parentTraceparent: row.trace_context })` (`outbox.publisher.ts:58-67`). Дальше отправка в Kafka инструментируется автоматически, и `inventory.consumer` / `notifications.consumer` подхватывают контекст уже из headers сообщения.
+- **Инициализация**: `tracing.js` подгружается через `NODE_OPTIONS=--require=/app/tracing.js`. Внутри `NodeSDK` поднимает `traceExporter: OTLPTraceExporter()` и `logRecordProcessors: [BatchLogRecordProcessor(OTLPLogExporter())]` без явного `url` — экспортёры берут эндпоинт из `OTEL_EXPORTER_OTLP_ENDPOINT` и сами подставляют `/v1/traces` и `/v1/logs`.
+- **Auto-instrumentation**: HTTP, `pg`, `ioredis`, `kafkajs`, `pino`. `fs`/`net`/`dns` отключены как шум.
+- **Логгер**: `nestjs-pino` подключён через `AppLoggerModule` из `libs/common/src/logger` во все 4 модуля; в `main.ts` — `app.useLogger(app.get(Logger))` с `bufferLogs: true`. JSON-выход, `/health` отфильтрован, `x-request-id` берётся из заголовка или генерится новым UUID.
+- **Корреляция**: `@opentelemetry/instrumentation-pino` врезает `trace_id`/`span_id`/`trace_flags` в каждую запись лога, выполненную внутри активного спана. В Grafana derivedField на Loki ловит `trace_id` и открывает спан в Jaeger одним кликом (`scripts/grafana-datasources.yaml`).
+- **Sending**: та же инструментация добавляет destination в pino — записи логов улетают в Logs SDK → BatchLogRecordProcessor → OTLPLogExporter → Collector → Loki (`/otlp/v1/logs`, требует `allow_structured_metadata: true` в `loki-config.yaml`).
+- **Через outbox-границу руками**. Авто-пропагация рвётся, потому что между `INSERT outbox` и публикацией в Kafka сидит polling-цикл в другом таймере. В транзакции `orders` сохраняем W3C `traceparent` в `orders_outbox.trace_context` через `captureTraceparent()` (`orders.service.ts:137,182`), а `OutboxPublisher` восстанавливает его как родителя спана `outbox.publish` через `withSpan(..., { parentTraceparent: row.trace_context })` (`outbox.publisher.ts:58-67`).
 - **Хелперы** в `libs/common/src/otel/with-span.ts`: `withSpan(tracerName, spanName, fn, { parentTraceparent? })` и `captureTraceparent()`. Используются ещё в `saga-recovery.service.ts` — фоновая джоба восстановления получает собственный root-спан.
-- **Env**: `OTEL_SERVICE_NAME` и `OTEL_EXPORTER_OTLP_ENDPOINT` (по умолчанию `http://jaeger:4318/v1/traces`). Сэмплинг — `parentbased_always_on` по умолчанию SDK.
-- **Ограничение**: миграция `1779373518241_orders-outbox-trace-context.js` снесла старую колонку `trace_id` (UUID не восстановить как OTel-родителя); строки, лежавшие в outbox до миграции, опубликуются как новые корни трасс.
+- **Env**: `OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT` (base, без `/v1/...`), `LOG_LEVEL` (по умолчанию `info`).
+- **Ограничение**: миграция `1779373518241_orders-outbox-trace-context.js` снесла старую колонку `trace_id`; строки в outbox до миграции опубликуются как новые корни трасс.
 
 ## Запуск
 
@@ -72,6 +78,7 @@ OpenTelemetry, экспорт по OTLP/HTTP в Jaeger all-in-one (UI на `:166
 docker compose up -d --build
 # health
 curl :3001/health :3002/health :3003/health :3004/health
+# трассы и логи: Jaeger :16686, Grafana → Explore → Loki / Jaeger на :3000
 # happy-path (каталог уже заполнен SKU-RED-SHIRT-M / SKU-BLUE-MUG / SKU-NOTEBOOK-A5)
 curl -X POST :3001/orders -H 'content-type: application/json' -d '{
   "customerId":"c1","email":"a@b.c",

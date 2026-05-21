@@ -1,6 +1,7 @@
 import { ConfigifyModule } from '@itgorillaz/configify';
 import { Module } from '@nestjs/common';
 import {
+  AppLoggerModule,
   KafkaConsumerService,
   ORDERS_TOPIC,
   PgModule,
@@ -13,6 +14,7 @@ import { NotificationsService } from './notifications.service';
 
 @Module({
   imports: [
+    AppLoggerModule,
     ConfigifyModule.forRootAsync(),
     PgModule.forRootAsync({
       inject: [AppConfiguration],

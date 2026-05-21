@@ -3,5 +3,6 @@ export * from './common.service';
 export * from './events';
 export * from './db';
 export * from './kafka';
+export * from './logger';
 export * from './otel';
 export * from './redis';

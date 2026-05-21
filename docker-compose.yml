@@ -75,7 +75,6 @@ services:
     container_name: ecommerce-jaeger
     ports:
       - "127.0.0.1:16686:16686"  # UI
-      - "127.0.0.1:4318:4318"    # OTLP HTTP
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
     healthcheck:
@@ -84,6 +83,50 @@ services:
       timeout: 3s
       retries: 6
       start_period: 10s
+
+  loki:
+    image: grafana/loki:3.2.1
+    container_name: ecommerce-loki
+    command: ["-config.file=/etc/loki/loki-config.yaml"]
+    volumes:
+      - ./scripts/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - lokidata:/loki
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3100/ready >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.111.0
+    container_name: ecommerce-otel-collector
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./scripts/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "127.0.0.1:4318:4318"  # OTLP HTTP — единая точка входа для сервисов
+    depends_on:
+      jaeger: { condition: service_healthy }
+      loki:   { condition: service_healthy }
+    # У contrib-образа distroless — внутри нет nc/wget. Healthcheck опускаем;
+    # OTLP-экспортеры в сервисах сами ретраят при недоступности коллектора.
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: ecommerce-grafana
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ./scripts/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+      - grafanadata:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      loki:   { condition: service_healthy }
+      jaeger: { condition: service_healthy }
 
   orders-migrate:
     build:
@@ -115,7 +158,7 @@ services:
       RESERVATION_TTL_SEC: "900"
       SAGA_TIMEOUT_SEC: "60"
       OTEL_SERVICE_NAME: orders
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       NODE_OPTIONS: --require=/app/tracing.js
     ports:
       - "127.0.0.1:3001:3000"
@@ -123,7 +166,7 @@ services:
       postgres:       { condition: service_healthy }
       redis:          { condition: service_healthy }
       kafka:          { condition: service_healthy }
-      jaeger:         { condition: service_healthy }
+      otel-collector: { condition: service_started }
       orders-migrate: { condition: service_completed_successfully }
     restart: unless-stopped
 
@@ -139,14 +182,14 @@ services:
       REDIS_URL: redis://redis:6379/2
       FAILURE_RATE: "0"
       OTEL_SERVICE_NAME: payments
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       NODE_OPTIONS: --require=/app/tracing.js
     ports:
       - "127.0.0.1:3002:3000"
     depends_on:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
-      jaeger:   { condition: service_healthy }
+      otel-collector: { condition: service_started }
     restart: unless-stopped
 
   inventory:
@@ -161,7 +204,7 @@ services:
       KAFKA_BROKERS: kafka:9092
       REDIS_URL: redis://redis:6379/1
       OTEL_SERVICE_NAME: inventory
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       NODE_OPTIONS: --require=/app/tracing.js
     ports:
       - "127.0.0.1:3003:3000"
@@ -169,7 +212,7 @@ services:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
       kafka:    { condition: service_healthy }
-      jaeger:   { condition: service_healthy }
+      otel-collector: { condition: service_started }
     restart: unless-stopped
 
   notifications:
@@ -185,7 +228,7 @@ services:
       REDIS_URL: redis://redis:6379/3
       SENDER_EMAIL: ops@example.com
       OTEL_SERVICE_NAME: notifications
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       NODE_OPTIONS: --require=/app/tracing.js
     ports:
       - "127.0.0.1:3004:3000"
@@ -193,10 +236,12 @@ services:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
       kafka:    { condition: service_healthy }
-      jaeger:   { condition: service_healthy }
+      otel-collector: { condition: service_started }
     restart: unless-stopped
 
 volumes:
   pgdata:
   redisdata:
   kafkadata:
+  lokidata:
+  grafanadata:

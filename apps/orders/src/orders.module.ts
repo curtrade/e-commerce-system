@@ -2,7 +2,12 @@ import { ConfigifyModule } from '@itgorillaz/configify';
 import { HttpModule } from '@nestjs/axios';
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
-import { KafkaProducerService, PgModule, RedisModule } from '@app/common';
+import {
+  AppLoggerModule,
+  KafkaProducerService,
+  PgModule,
+  RedisModule,
+} from '@app/common';
 import { AppConfiguration } from './app.configuration';
 import { InventoryClient } from './clients/inventory.client';
 import { PaymentsClient } from './clients/payments.client';
@@ -14,6 +19,7 @@ import { SagaRecoveryService } from './saga-recovery.service';
 
 @Module({
   imports: [
+    AppLoggerModule,
     ConfigifyModule.forRootAsync(),
     ScheduleModule.forRoot(),
     HttpModule,

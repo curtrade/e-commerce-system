@@ -2,6 +2,7 @@ import { ConfigifyModule } from '@itgorillaz/configify';
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import {
+  AppLoggerModule,
   KafkaConsumerService,
   PgModule,
   RedisModule,
@@ -16,6 +17,7 @@ import { InventoryService } from './inventory.service';
 
 @Module({
   imports: [
+    AppLoggerModule,
     ConfigifyModule.forRootAsync(),
     ScheduleModule.forRoot(),
     PgModule.forRootAsync({
