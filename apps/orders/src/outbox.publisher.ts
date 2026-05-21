@@ -1,12 +1,9 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { SchedulerRegistry } from '@nestjs/schedule';
-import { randomUUID } from 'crypto';
-import { ClsService, ClsStore } from 'nestjs-cls';
 import {
   EventEnvelope,
   KafkaProducerService,
   PgService,
-  TRACE_ID_KEY,
   withSpan,
 } from '@app/common';
 
@@ -16,7 +13,7 @@ interface OutboxRow {
   topic: string;
   event_type: string;
   payload: Record<string, unknown>;
-  trace_id: string | null;
+  trace_context: string | null;
   attempts: number;
 }
 
@@ -31,7 +28,6 @@ export class OutboxPublisher implements OnModuleInit {
     private readonly pg: PgService,
     private readonly producer: KafkaProducerService,
     private readonly scheduler: SchedulerRegistry,
-    private readonly cls: ClsService<ClsStore>,
   ) {}
 
   onModuleInit(): void {
@@ -51,7 +47,7 @@ export class OutboxPublisher implements OnModuleInit {
       // for-loop below. Cross-replica double-publish protection requires
       // wrapping the SELECT + UPDATE in a single transaction.
       const { rows } = await this.pg.query<OutboxRow>(
-        `SELECT id, aggregate_id, topic, event_type, payload, trace_id, attempts
+        `SELECT id, aggregate_id, topic, event_type, payload, trace_context, attempts
            FROM orders_outbox
           WHERE published_at IS NULL
           ORDER BY created_at
@@ -59,15 +55,15 @@ export class OutboxPublisher implements OnModuleInit {
           FOR UPDATE SKIP LOCKED`,
       );
       for (const row of rows) {
-        await this.cls.run(() =>
-          withSpan('orders-outbox', 'outbox.publish', async (span) => {
-            const traceId = row.trace_id ?? randomUUID();
-            this.cls.set(TRACE_ID_KEY, traceId);
+        await withSpan(
+          'orders-outbox',
+          'outbox.publish',
+          async (span) => {
             span.setAttribute('outbox.row.id', row.id);
             span.setAttribute('outbox.event_type', row.event_type);
-            span.setAttribute('app.trace_id', traceId);
             return this.publishRow(row);
-          }),
+          },
+          { parentTraceparent: row.trace_context },
         );
       }
     } catch (err) {
@@ -82,7 +78,6 @@ export class OutboxPublisher implements OnModuleInit {
       eventId: row.id,
       eventType: row.event_type,
       occurredAt: new Date().toISOString(),
-      traceId: this.cls.get(TRACE_ID_KEY),
       payload: row.payload,
     };
     try {

@@ -43,7 +43,6 @@
     "class-validator": "^0.15.1",
     "ioredis": "^5.4.1",
     "kafkajs": "^2.2.4",
-    "nestjs-cls": "^6.2.0",
     "node-pg-migrate": "^8.0.4",
     "pg": "^8.13.1",
     "reflect-metadata": "^0.2.2",

@@ -35,9 +35,7 @@ export class PaymentsService {
     dto: ChargeDto,
     idemKey: string,
   ): Promise<{ paymentId: string; status: 'CHARGED' }> {
-    const cached = await this.redis
-      .raw()
-      .get(`pay:idem:${idemKey}`);
+    const cached = await this.redis.raw().get(`pay:idem:${idemKey}`);
     if (cached) {
       return JSON.parse(cached) as { paymentId: string; status: 'CHARGED' };
     }

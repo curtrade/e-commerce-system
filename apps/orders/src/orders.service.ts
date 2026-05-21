@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { ClsService, ClsStore } from 'nestjs-cls';
-import { PgService, TRACE_ID_KEY } from '@app/common';
+import { PgService, captureTraceparent } from '@app/common';
 import {
   ORDERS_TOPIC,
   OrderConfirmedPayload,
@@ -44,21 +43,24 @@ export class OrdersService {
     private readonly inventory: InventoryClient,
     private readonly payments: PaymentsClient,
     private readonly cfg: AppConfiguration,
-    private readonly cls: ClsService<ClsStore>,
   ) {}
 
   async createOrder(dto: CreateOrderDto) {
     const orderId = randomUUID();
     const attemptId = randomUUID();
-    const total = dto.items.reduce(
-      (sum, it) => sum + it.qty * it.unitPrice,
-      0,
-    );
+    const total = dto.items.reduce((sum, it) => sum + it.qty * it.unitPrice, 0);
 
     await this.pg.query(
       `INSERT INTO orders (id, customer_id, email, items, total, status, attempt_id)
        VALUES ($1, $2, $3, $4::jsonb, $5, 'PENDING', $6)`,
-      [orderId, dto.customerId, dto.email, JSON.stringify(dto.items), total, attemptId],
+      [
+        orderId,
+        dto.customerId,
+        dto.email,
+        JSON.stringify(dto.items),
+        total,
+        attemptId,
+      ],
     );
 
     const idemKey = `${orderId}:${attemptId}`;
@@ -124,7 +126,7 @@ export class OrdersService {
       };
 
       await client.query(
-        `INSERT INTO orders_outbox (id, aggregate_id, topic, event_type, payload, trace_id)
+        `INSERT INTO orders_outbox (id, aggregate_id, topic, event_type, payload, trace_context)
          VALUES ($1, $2, $3, $4, $5::jsonb, $6)`,
         [
           randomUUID(),
@@ -132,7 +134,7 @@ export class OrdersService {
           ORDERS_TOPIC,
           'OrderConfirmed',
           JSON.stringify(payload),
-          this.currentTraceId(),
+          captureTraceparent(),
         ],
       );
     });
@@ -169,7 +171,7 @@ export class OrdersService {
         reason,
       };
       await client.query(
-        `INSERT INTO orders_outbox (id, aggregate_id, topic, event_type, payload, trace_id)
+        `INSERT INTO orders_outbox (id, aggregate_id, topic, event_type, payload, trace_context)
          VALUES ($1, $2, $3, $4, $5::jsonb, $6)`,
         [
           randomUUID(),
@@ -177,14 +179,10 @@ export class OrdersService {
           ORDERS_TOPIC,
           'OrderFailed',
           JSON.stringify(payload),
-          this.currentTraceId(),
+          captureTraceparent(),
         ],
       );
     });
-  }
-
-  private currentTraceId(): string | null {
-    return this.cls.get(TRACE_ID_KEY) ?? null;
   }
 
   async getOrder(orderId: string) {

@@ -43,7 +43,11 @@ export class NotificationsService {
     await this.pg.query(
       `INSERT INTO notifications (order_id, channel, recipient, subject, body)
        VALUES ($1, 'email', $2, 'Order failed', $3)`,
-      [args.orderId, args.email, `Order ${args.orderId} failed: ${args.reason}`],
+      [
+        args.orderId,
+        args.email,
+        `Order ${args.orderId} failed: ${args.reason}`,
+      ],
     );
   }
 }
