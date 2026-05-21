@@ -6,6 +6,7 @@ import {
   EventEnvelope,
   KafkaProducerService,
   PgService,
+  withSpan,
 } from '@app/common';
 
 interface OutboxRow {
@@ -53,10 +54,14 @@ export class OutboxPublisher implements OnModuleInit {
           FOR UPDATE SKIP LOCKED`,
       );
       for (const row of rows) {
-        await this.cls.run(() => {
-          this.cls.set('traceId', row.trace_id ?? randomUUID());
-          return this.publishRow(row);
-        });
+        await this.cls.run(() =>
+          withSpan('orders-outbox', 'outbox.publish', async (span) => {
+            span.setAttribute('outbox.row.id', row.id);
+            span.setAttribute('outbox.event_type', row.event_type);
+            this.cls.set('traceId', row.trace_id ?? randomUUID());
+            return this.publishRow(row);
+          }),
+        );
       }
     } catch (err) {
       this.logger.error(`Outbox tick failed: ${(err as Error).message}`);

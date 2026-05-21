@@ -19,6 +19,7 @@ COPY tsconfig.json tsconfig.build.json nest-cli.json package.json ./
 COPY libs ./libs
 COPY apps ./apps
 COPY migrations ./migrations
+COPY tracing.js ./
 RUN test -n "$SERVICE" || (echo "ERROR: SERVICE build-arg required" && exit 1)
 RUN npx nest build ${SERVICE}
 RUN npm prune --omit=dev
@@ -33,6 +34,7 @@ RUN addgroup -g 1001 -S app && adduser -S app -u 1001
 COPY --from=build --chown=app:app /app/node_modules ./node_modules
 COPY --from=build --chown=app:app /app/dist ./dist
 COPY --from=build --chown=app:app /app/migrations ./migrations
+COPY --from=build --chown=app:app /app/tracing.js ./
 COPY --from=build --chown=app:app /app/package.json ./
 USER app
 EXPOSE 3000

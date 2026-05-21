@@ -70,6 +70,21 @@ services:
       kafka:
         condition: service_healthy
 
+  jaeger:
+    image: jaegertracing/all-in-one:1.62
+    container_name: ecommerce-jaeger
+    ports:
+      - "127.0.0.1:16686:16686"  # UI
+      - "127.0.0.1:4318:4318"    # OTLP HTTP
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:14269/ >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
   orders-migrate:
     build:
       context: .
@@ -99,12 +114,16 @@ services:
       PAYMENTS_URL: http://payments:3000
       RESERVATION_TTL_SEC: "900"
       SAGA_TIMEOUT_SEC: "60"
+      OTEL_SERVICE_NAME: orders
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+      NODE_OPTIONS: --require=/app/tracing.js
     ports:
       - "127.0.0.1:3001:3000"
     depends_on:
       postgres:       { condition: service_healthy }
       redis:          { condition: service_healthy }
       kafka:          { condition: service_healthy }
+      jaeger:         { condition: service_healthy }
       orders-migrate: { condition: service_completed_successfully }
     restart: unless-stopped
 
@@ -119,11 +138,15 @@ services:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/payments
       REDIS_URL: redis://redis:6379/2
       FAILURE_RATE: "0"
+      OTEL_SERVICE_NAME: payments
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+      NODE_OPTIONS: --require=/app/tracing.js
     ports:
       - "127.0.0.1:3002:3000"
     depends_on:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
+      jaeger:   { condition: service_healthy }
     restart: unless-stopped
 
   inventory:
@@ -137,12 +160,16 @@ services:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/inventory
       KAFKA_BROKERS: kafka:9092
       REDIS_URL: redis://redis:6379/1
+      OTEL_SERVICE_NAME: inventory
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+      NODE_OPTIONS: --require=/app/tracing.js
     ports:
       - "127.0.0.1:3003:3000"
     depends_on:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
       kafka:    { condition: service_healthy }
+      jaeger:   { condition: service_healthy }
     restart: unless-stopped
 
   notifications:
@@ -157,12 +184,16 @@ services:
       KAFKA_BROKERS: kafka:9092
       REDIS_URL: redis://redis:6379/3
       SENDER_EMAIL: ops@example.com
+      OTEL_SERVICE_NAME: notifications
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+      NODE_OPTIONS: --require=/app/tracing.js
     ports:
       - "127.0.0.1:3004:3000"
     depends_on:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
       kafka:    { condition: service_healthy }
+      jaeger:   { condition: service_healthy }
     restart: unless-stopped
 
 volumes:
