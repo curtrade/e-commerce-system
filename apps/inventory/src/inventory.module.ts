@@ -1,12 +1,10 @@
 import { ConfigifyModule } from '@itgorillaz/configify';
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
-import { ClsService, ClsStore } from 'nestjs-cls';
 import {
   KafkaConsumerService,
   PgModule,
   RedisModule,
-  SharedClsModule,
   ORDERS_TOPIC,
 } from '@app/common';
 import { AppConfiguration } from './app.configuration';
@@ -18,7 +16,6 @@ import { InventoryService } from './inventory.service';
 
 @Module({
   imports: [
-    SharedClsModule,
     ConfigifyModule.forRootAsync(),
     ScheduleModule.forRoot(),
     PgModule.forRootAsync({
@@ -39,17 +36,14 @@ import { InventoryService } from './inventory.service';
     InventoryReaper,
     {
       provide: KafkaConsumerService,
-      inject: [AppConfiguration, ClsService],
-      useFactory: (cfg: AppConfiguration, cls: ClsService<ClsStore>) =>
-        new KafkaConsumerService(
-          {
-            clientId: 'inventory',
-            brokers: cfg.kafkaBrokers.split(',').map((b) => b.trim()),
-            groupId: 'inventory-orders',
-            topics: [ORDERS_TOPIC],
-          },
-          cls,
-        ),
+      inject: [AppConfiguration],
+      useFactory: (cfg: AppConfiguration) =>
+        new KafkaConsumerService({
+          clientId: 'inventory',
+          brokers: cfg.kafkaBrokers.split(',').map((b) => b.trim()),
+          groupId: 'inventory-orders',
+          topics: [ORDERS_TOPIC],
+        }),
     },
   ],
 })

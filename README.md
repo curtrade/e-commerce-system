@@ -55,6 +55,17 @@ POST /orders
 - `inventory` кэширует результат reserve в Redis (`inv:idem:*`, TTL 24 ч).
 - Kafka-консьюмеры дедуплицируют по `eventId` через `redis.claimIdempotency` (TTL 7 дней).
 
+## Distributed tracing
+
+OpenTelemetry, экспорт по OTLP/HTTP в Jaeger all-in-one (UI на `:16686`, OTLP на `:4318`).
+
+- **Инициализация**: `tracing.js` подгружается в каждый сервис через `NODE_OPTIONS=--require=/app/tracing.js` (см. `docker-compose.yml`). Внутри — `NodeSDK` + `getNodeAutoInstrumentations`; `fs`/`net`/`dns` отключены как шум.
+- **Auto-instrumentation**: HTTP (входящий и исходящий), `pg`, `ioredis`, `kafkajs`. Saga `orders → inventory → payments` собирается в одну трассу без ручных спанов: `traceparent` прорастает через HTTP-хедеры и Kafka message headers автоматически.
+- **Через outbox-границу руками**. Авто-пропагация рвётся, потому что между `INSERT outbox` и публикацией в Kafka сидит polling-цикл в другом таймере. Поэтому в транзакции `orders` мы сохраняем W3C `traceparent` в `orders_outbox.trace_context` через `captureTraceparent()` (`orders.service.ts:137,182`), а `OutboxPublisher` восстанавливает его как родителя спана `outbox.publish` через `withSpan(..., { parentTraceparent: row.trace_context })` (`outbox.publisher.ts:58-67`). Дальше отправка в Kafka инструментируется автоматически, и `inventory.consumer` / `notifications.consumer` подхватывают контекст уже из headers сообщения.
+- **Хелперы** в `libs/common/src/otel/with-span.ts`: `withSpan(tracerName, spanName, fn, { parentTraceparent? })` и `captureTraceparent()`. Используются ещё в `saga-recovery.service.ts` — фоновая джоба восстановления получает собственный root-спан.
+- **Env**: `OTEL_SERVICE_NAME` и `OTEL_EXPORTER_OTLP_ENDPOINT` (по умолчанию `http://jaeger:4318/v1/traces`). Сэмплинг — `parentbased_always_on` по умолчанию SDK.
+- **Ограничение**: миграция `1779373518241_orders-outbox-trace-context.js` снесла старую колонку `trace_id` (UUID не восстановить как OTel-родителя); строки, лежавшие в outbox до миграции, опубликуются как новые корни трасс.
+
 ## Запуск
 
 ```bash

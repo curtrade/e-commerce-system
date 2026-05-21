@@ -55,9 +55,7 @@ export class InventoryService {
           [item.sku, item.qty],
         );
         if (rowCount === 0) {
-          throw new ConflictException(
-            `Insufficient stock for SKU ${item.sku}`,
-          );
+          throw new ConflictException(`Insufficient stock for SKU ${item.sku}`);
         }
       }
 
@@ -166,7 +164,9 @@ export class InventoryService {
     key: string,
   ): Promise<{ reservationId: string; expiresAt: string } | null> {
     const raw = await this.redis.raw().get(`inv:idem:${key}`);
-    return raw ? (JSON.parse(raw) as { reservationId: string; expiresAt: string }) : null;
+    return raw
+      ? (JSON.parse(raw) as { reservationId: string; expiresAt: string })
+      : null;
   }
 
   private async storeIdempotent(

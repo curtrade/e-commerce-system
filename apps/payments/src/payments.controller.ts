@@ -18,10 +18,7 @@ export class PaymentsController {
 
   @Post('charge')
   @HttpCode(201)
-  charge(
-    @Body() dto: ChargeDto,
-    @Headers('idempotency-key') idemKey?: string,
-  ) {
+  charge(@Body() dto: ChargeDto, @Headers('idempotency-key') idemKey?: string) {
     if (!idemKey) {
       throw new BadRequestException('Idempotency-Key header is required');
     }
