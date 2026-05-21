@@ -6,6 +6,8 @@ import {
   EventEnvelope,
   KafkaProducerService,
   PgService,
+  TRACE_ID_KEY,
+  withSpan,
 } from '@app/common';
 
 interface OutboxRow {
@@ -43,7 +45,11 @@ export class OutboxPublisher implements OnModuleInit {
     if (this.running) return;
     this.running = true;
     try {
-      // SKIP LOCKED ⇒ multiple replicas can poll without stepping on each other.
+      // SKIP LOCKED prevents two pollers from racing on the SELECT itself.
+      // NOTE: pg.query() goes through pool.query (auto-commit), so the row lock
+      // is released the moment the SELECT returns — it does NOT protect the
+      // for-loop below. Cross-replica double-publish protection requires
+      // wrapping the SELECT + UPDATE in a single transaction.
       const { rows } = await this.pg.query<OutboxRow>(
         `SELECT id, aggregate_id, topic, event_type, payload, trace_id, attempts
            FROM orders_outbox
@@ -53,10 +59,16 @@ export class OutboxPublisher implements OnModuleInit {
           FOR UPDATE SKIP LOCKED`,
       );
       for (const row of rows) {
-        await this.cls.run(() => {
-          this.cls.set('traceId', row.trace_id ?? randomUUID());
-          return this.publishRow(row);
-        });
+        await this.cls.run(() =>
+          withSpan('orders-outbox', 'outbox.publish', async (span) => {
+            const traceId = row.trace_id ?? randomUUID();
+            this.cls.set(TRACE_ID_KEY, traceId);
+            span.setAttribute('outbox.row.id', row.id);
+            span.setAttribute('outbox.event_type', row.event_type);
+            span.setAttribute('app.trace_id', traceId);
+            return this.publishRow(row);
+          }),
+        );
       }
     } catch (err) {
       this.logger.error(`Outbox tick failed: ${(err as Error).message}`);
@@ -70,7 +82,7 @@ export class OutboxPublisher implements OnModuleInit {
       eventId: row.id,
       eventType: row.event_type,
       occurredAt: new Date().toISOString(),
-      traceId: this.cls.get('traceId'),
+      traceId: this.cls.get(TRACE_ID_KEY),
       payload: row.payload,
     };
     try {
