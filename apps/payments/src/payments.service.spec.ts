@@ -22,6 +22,8 @@ function setup(failureRate = 0) {
 
 const DTO: ChargeDto = { orderId: 'order-1', amount: 42.5 };
 
+afterEach(() => jest.restoreAllMocks());
+
 describe('PaymentsService.charge', () => {
   it('returns cached result when Redis idempotency key is set', async () => {
     const s = setup();
@@ -39,26 +41,18 @@ describe('PaymentsService.charge', () => {
 
   it('throws BadGateway when Math.random() falls below failureRate', async () => {
     const s = setup(0.5);
-    const randSpy = jest.spyOn(Math, 'random').mockReturnValue(0.1);
+    jest.spyOn(Math, 'random').mockReturnValue(0.1);
 
-    try {
-      await expect(s.service.charge(DTO, 'idem-2')).rejects.toThrow(
-        BadGatewayException,
-      );
-      await expect(s.service.charge(DTO, 'idem-2')).rejects.toThrow(
-        'Simulated payment provider failure',
-      );
-    } finally {
-      randSpy.mockRestore();
-    }
-
+    const err = await s.service.charge(DTO, 'idem-2').catch((e) => e as Error);
+    expect(err).toBeInstanceOf(BadGatewayException);
+    expect(err.message).toBe('Simulated payment provider failure');
     expect(s.pg.query).not.toHaveBeenCalled();
   });
 
   it('persists payment, caches result in Redis with 24h TTL, returns id from re-read', async () => {
     const s = setup();
     s.redis.get.mockResolvedValueOnce(null);
-    const randSpy = jest.spyOn(Math, 'random').mockReturnValue(0.99);
+    jest.spyOn(Math, 'random').mockReturnValue(0.99);
     // INSERT does not return rows — just ack the call.
     s.pg.query
       .mockResolvedValueOnce(pgResult())
@@ -66,75 +60,65 @@ describe('PaymentsService.charge', () => {
         pgResult([{ id: 'pay-fresh', status: 'CHARGED' as const }]),
       );
 
-    try {
-      const res = await s.service.charge(DTO, 'idem-3');
-      expect(res).toEqual({ paymentId: 'pay-fresh', status: 'CHARGED' });
+    const res = await s.service.charge(DTO, 'idem-3');
+    expect(res).toEqual({ paymentId: 'pay-fresh', status: 'CHARGED' });
 
-      const insertCall = s.pg.query.mock.calls[0];
-      expect(insertCall[0]).toMatch(/INSERT INTO payments/);
-      expect(insertCall[0]).toMatch(/ON CONFLICT \(idempotency_key\) DO NOTHING/);
-      const insertParams = insertCall[1] as unknown[];
-      expect(insertParams[0]).toMatch(UUID_RE); // generated paymentId
-      expect(insertParams[1]).toBe('order-1');
-      expect(insertParams[2]).toBe(42.5);
-      expect(insertParams[3]).toBe('idem-3');
+    const insertCall = s.pg.query.mock.calls[0];
+    expect(insertCall[0]).toMatch(/INSERT INTO payments/);
+    expect(insertCall[0]).toMatch(/ON CONFLICT \(idempotency_key\) DO NOTHING/);
+    const insertParams = insertCall[1] as unknown[];
+    expect(insertParams[0]).toMatch(UUID_RE); // generated paymentId
+    expect(insertParams[1]).toBe('order-1');
+    expect(insertParams[2]).toBe(42.5);
+    expect(insertParams[3]).toBe('idem-3');
 
-      expect(s.pg.query.mock.calls[1][0]).toMatch(/SELECT id, status FROM payments/);
+    expect(s.pg.query.mock.calls[1][0]).toMatch(
+      /SELECT id, status FROM payments/,
+    );
 
-      expect(s.redis.set).toHaveBeenCalledWith(
-        'pay:idem:idem-3',
-        JSON.stringify({ paymentId: 'pay-fresh', status: 'CHARGED' }),
-        'EX',
-        24 * 60 * 60,
-      );
-    } finally {
-      randSpy.mockRestore();
-    }
+    expect(s.redis.set).toHaveBeenCalledWith(
+      'pay:idem:idem-3',
+      JSON.stringify({ paymentId: 'pay-fresh', status: 'CHARGED' }),
+      'EX',
+      24 * 60 * 60,
+    );
   });
 
   it('on concurrent ON CONFLICT path: re-read returns existing row, no duplicate row created', async () => {
     const s = setup();
     s.redis.get.mockResolvedValueOnce(null);
-    const randSpy = jest.spyOn(Math, 'random').mockReturnValue(0.99);
+    jest.spyOn(Math, 'random').mockReturnValue(0.99);
     s.pg.query
       .mockResolvedValueOnce(pgResult()) // INSERT skipped by ON CONFLICT
       .mockResolvedValueOnce(
         pgResult([{ id: 'pay-existing', status: 'CHARGED' as const }]),
       );
 
-    try {
-      const res = await s.service.charge(DTO, 'idem-4');
-      // Caller sees the existing paymentId from the concurrent writer.
-      expect(res.paymentId).toBe('pay-existing');
-      // Even though our INSERT was a no-op, we still cache the result so the
-      // next call hits the fast path.
-      expect(s.redis.set).toHaveBeenCalledWith(
-        'pay:idem:idem-4',
-        JSON.stringify({ paymentId: 'pay-existing', status: 'CHARGED' }),
-        'EX',
-        86400,
-      );
-    } finally {
-      randSpy.mockRestore();
-    }
+    const res = await s.service.charge(DTO, 'idem-4');
+    // Caller sees the existing paymentId from the concurrent writer.
+    expect(res.paymentId).toBe('pay-existing');
+    // Even though our INSERT was a no-op, we still cache the result so the
+    // next call hits the fast path.
+    expect(s.redis.set).toHaveBeenCalledWith(
+      'pay:idem:idem-4',
+      JSON.stringify({ paymentId: 'pay-existing', status: 'CHARGED' }),
+      'EX',
+      86400,
+    );
   });
 
   it('throws BadGateway if re-read returns no row (persistence somehow failed)', async () => {
     const s = setup();
     s.redis.get.mockResolvedValueOnce(null);
-    const randSpy = jest.spyOn(Math, 'random').mockReturnValue(0.99);
+    jest.spyOn(Math, 'random').mockReturnValue(0.99);
     s.pg.query
       .mockResolvedValueOnce(pgResult())
       .mockResolvedValueOnce(pgResult()); // empty re-read
 
-    try {
-      await expect(s.service.charge(DTO, 'idem-5')).rejects.toThrow(
-        'Failed to persist payment',
-      );
-      expect(s.redis.set).not.toHaveBeenCalled();
-    } finally {
-      randSpy.mockRestore();
-    }
+    const err = await s.service.charge(DTO, 'idem-5').catch((e) => e as Error);
+    expect(err).toBeInstanceOf(BadGatewayException);
+    expect(err.message).toBe('Failed to persist payment');
+    expect(s.redis.set).not.toHaveBeenCalled();
   });
 });
 

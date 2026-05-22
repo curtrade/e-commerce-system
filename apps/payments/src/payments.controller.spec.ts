@@ -18,36 +18,38 @@ describe('PaymentsController', () => {
     const { controller, service } = setup();
     const dto: ChargeDto = { orderId: 'o-1', amount: 10 };
 
-    expect(() => controller.charge(dto, undefined)).toThrow(
-      BadRequestException,
-    );
-    expect(() => controller.charge(dto, undefined)).toThrow(
-      'Idempotency-Key header is required',
-    );
+    const err = (() => {
+      try {
+        controller.charge(dto, undefined);
+        return null;
+      } catch (e) {
+        return e as Error;
+      }
+    })();
+    expect(err).toBeInstanceOf(BadRequestException);
+    expect(err?.message).toBe('Idempotency-Key header is required');
     expect(service.charge).not.toHaveBeenCalled();
   });
 
-  it('POST /charge forwards DTO and idempotency key to service', () => {
+  it('POST /charge forwards DTO and idempotency key to service', async () => {
     const { controller, service } = setup();
     const dto: ChargeDto = { orderId: 'o-1', amount: 10 };
     const result = { paymentId: 'p-1', status: 'CHARGED' as const };
     (service.charge as jest.Mock).mockResolvedValue(result);
 
-    const res = controller.charge(dto, 'idem-x');
-
+    await expect(controller.charge(dto, 'idem-x')).resolves.toBe(result);
     expect(service.charge).toHaveBeenCalledWith(dto, 'idem-x');
-    expect(res).resolves.toBe(result);
   });
 
-  it('POST /refund forwards DTO', () => {
+  it('POST /refund forwards DTO', async () => {
     const { controller, service } = setup();
     const dto: RefundDto = { paymentId: 'p-1', reason: 'asked' };
     (service.refund as jest.Mock).mockResolvedValue({ status: 'REFUNDED' });
 
-    const res = controller.refund(dto);
-
+    await expect(controller.refund(dto)).resolves.toEqual({
+      status: 'REFUNDED',
+    });
     expect(service.refund).toHaveBeenCalledWith(dto);
-    expect(res).resolves.toEqual({ status: 'REFUNDED' });
   });
 
   it('GET /by-order/:orderId returns row when found', async () => {
@@ -64,11 +66,8 @@ describe('PaymentsController', () => {
     const { controller, service } = setup();
     (service.getByOrder as jest.Mock).mockResolvedValue(null);
 
-    await expect(controller.byOrder('missing')).rejects.toThrow(
-      NotFoundException,
-    );
-    await expect(controller.byOrder('missing')).rejects.toThrow(
-      'No payment for this order',
-    );
+    const err = await controller.byOrder('missing').catch((e) => e as Error);
+    expect(err).toBeInstanceOf(NotFoundException);
+    expect(err.message).toBe('No payment for this order');
   });
 });

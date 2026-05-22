@@ -44,9 +44,8 @@ describe('OrdersController', () => {
     const { controller, service } = setup();
     (service.getOrder as jest.Mock).mockResolvedValue(null);
 
-    await expect(controller.get('missing')).rejects.toThrow(NotFoundException);
-    await expect(controller.get('missing')).rejects.toThrow(
-      'Order missing not found',
-    );
+    const err = await controller.get('missing').catch((e) => e as Error);
+    expect(err).toBeInstanceOf(NotFoundException);
+    expect(err.message).toBe('Order missing not found');
   });
 });

@@ -1,4 +1,6 @@
+import type { EachMessagePayload } from 'kafkajs';
 import {
+  EnvelopeHandler,
   EventEnvelope,
   KafkaConsumerService,
   OrderConfirmedPayload,
@@ -8,10 +10,12 @@ import { InventoryConsumer } from './inventory.consumer';
 import { InventoryService } from './inventory.service';
 import { createMockRedis } from '../../../test/helpers/mock-factories';
 
+const FAKE_RAW = {} as EachMessagePayload;
+
 function setup() {
-  let registeredHandler: ((env: EventEnvelope) => Promise<void>) | undefined;
+  let registeredHandler: EnvelopeHandler | undefined;
   const consumer = {
-    registerHandler: jest.fn((h: typeof registeredHandler) => {
+    registerHandler: jest.fn((h: EnvelopeHandler) => {
       registeredHandler = h;
     }),
   } as unknown as KafkaConsumerService;
@@ -24,7 +28,8 @@ function setup() {
   new InventoryConsumer(consumer, inventory, redis.service);
 
   if (!registeredHandler) throw new Error('handler not registered');
-  return { handle: registeredHandler, inventory, redis };
+  const handle = (env: EventEnvelope) => registeredHandler!(env, FAKE_RAW);
+  return { handle, inventory, redis };
 }
 
 function envelope<T>(

@@ -50,12 +50,11 @@ describe('InventoryService.reserve', () => {
     // First UPDATE returns rowCount=0 → insufficient stock for first SKU.
     s.pg.txClientQuery.mockResolvedValueOnce(pgResult());
 
-    await expect(s.service.reserve(RESERVE_DTO, 'idem-2')).rejects.toThrow(
-      ConflictException,
-    );
-    await expect(s.service.reserve(RESERVE_DTO, 'idem-2')).rejects.toThrow(
-      /Insufficient stock for SKU SKU-A/, // sorted first
-    );
+    const err = await s.service
+      .reserve(RESERVE_DTO, 'idem-2')
+      .catch((e) => e as Error);
+    expect(err).toBeInstanceOf(ConflictException);
+    expect(err.message).toMatch(/Insufficient stock for SKU SKU-A/); // sorted first
   });
 
   it('updates stock in sorted SKU order then inserts reservation', async () => {

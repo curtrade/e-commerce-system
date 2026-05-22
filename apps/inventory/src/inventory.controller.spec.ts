@@ -23,9 +23,16 @@ describe('InventoryController', () => {
   it('POST /reserve without Idempotency-Key header → 400', () => {
     const { controller, service } = setup();
 
-    expect(() => controller.reserve(RESERVE, undefined)).toThrow(
-      BadRequestException,
-    );
+    const err = (() => {
+      try {
+        controller.reserve(RESERVE, undefined);
+        return null;
+      } catch (e) {
+        return e as Error;
+      }
+    })();
+    expect(err).toBeInstanceOf(BadRequestException);
+    expect(err?.message).toBe('Idempotency-Key header is required');
     expect(service.reserve).not.toHaveBeenCalled();
   });
 

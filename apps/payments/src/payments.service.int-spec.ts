@@ -59,23 +59,34 @@ describe('PaymentsService (integration)', () => {
       expect(afterSecond).toBe(1); // still exactly one row
     });
 
-    it('concurrent calls with same idemKey produce exactly one row (ON CONFLICT)', async () => {
+    it('concurrent calls with same idemKey both hit PG and produce exactly one row (ON CONFLICT)', async () => {
       const idem = 'idem-int-conc';
-      // Bypass Redis cache for both by forcing a cache-miss race: pre-empt the
-      // cache layer by deleting any key before each call's get(). Simpler:
-      // both calls start while cache is empty.
-      const [a, b] = await Promise.all([
-        svc.charge({ orderId: 'o-2', amount: 5 }, idem),
-        svc.charge({ orderId: 'o-2', amount: 5 }, idem),
-      ]);
+      // Force a cache miss on BOTH calls so ON CONFLICT is the only gate.
+      // Otherwise the second call could hit Redis cache and skip PG entirely,
+      // making this test pass without exercising the ON CONFLICT path at all.
+      const rawClient = redis.raw();
+      const getSpy = jest
+        .spyOn(rawClient, 'get')
+        .mockImplementation(async (key: unknown) =>
+          typeof key === 'string' && key.startsWith('pay:idem:') ? null : '',
+        );
 
-      // Both return same paymentId (the surviving INSERT).
-      expect(a.paymentId).toBe(b.paymentId);
-      const { rowCount } = await pg.query(
-        'SELECT 1 FROM payments WHERE idempotency_key = $1',
-        [idem],
-      );
-      expect(rowCount).toBe(1);
+      try {
+        const [a, b] = await Promise.all([
+          svc.charge({ orderId: 'o-2', amount: 5 }, idem),
+          svc.charge({ orderId: 'o-2', amount: 5 }, idem),
+        ]);
+
+        // Both return same paymentId (the surviving INSERT).
+        expect(a.paymentId).toBe(b.paymentId);
+        const { rowCount } = await pg.query(
+          'SELECT 1 FROM payments WHERE idempotency_key = $1',
+          [idem],
+        );
+        expect(rowCount).toBe(1);
+      } finally {
+        getSpy.mockRestore();
+      }
     });
 
     it('caches result in Redis with TTL after first charge', async () => {
