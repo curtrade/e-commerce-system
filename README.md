@@ -96,6 +96,65 @@ Dev-режим (без контейнеров) — поднять Postgres/Redis
 - Все события публикуются в один топик `orders.events`; `StockChanged` и фоновые проекции не реализованы.
 - Refund-flow при системном долге описан в дизайне, но не автоматизирован.
 
+## Тестирование
+
+Покрыт только `apps/orders` — там, где живёт сага. Jest разведён на два проекта через `jest.config.ts`:
+
+| Группа | Регистр | Команда | Окружение |
+|---|---|---|---|
+| `unit` | `*.spec.ts` | `npm run test:unit` | Только моки (`test/helpers/mock-factories.ts`): `PgService`, `KafkaProducerService`, `SchedulerRegistry`, HTTP-клиенты `inventory`/`payments`. |
+| `integration` | `*.int-spec.ts` | `npm run test:integration` | `globalSetup` поднимает Postgres 16 и Redis 7 через `testcontainers`, накатывает схему из `scripts/init-db.sql` + миграции `migrations/orders`. Kafka не поднимается — продьюсер мокается. `--runInBand`, `testTimeout: 60s`. |
+
+`npm test` запускает обе группы. `npm run test:cov` — с покрытием.
+
+### Unit (`apps/orders/src/*.spec.ts`)
+
+**`orders.controller.spec.ts` — `OrdersController`** (тонкая обёртка над сервисом):
+- `POST /` пробрасывает DTO в `service.createOrder` и возвращает его результат как есть.
+- `GET /:id` возвращает строку, если сервис её отдал.
+- `GET /:id` бросает `NotFoundException` с текстом `Order <id> not found`, если сервис вернул `null`.
+
+**`orders.service.spec.ts` — `OrdersService`** (ядро саги, всё на моках pg/inventory/payments):
+- happy path (5 проверок одного прогона): `INSERT orders` с `PENDING` и корректным `total`; idempotency-key вида `<orderId>:<attemptId>`, оба UUID, один и тот же ключ улетает в `reserve` и `charge`; `ttlSec` из конфига (а не зашитые 900); `amount` в `charge` равен подсчитанному total; `release` не дергается; `withTransaction` ровно один с двумя запросами — `UPDATE orders … CONFIRMED` и `INSERT orders_outbox` с `event_type='OrderConfirmed'` и payload, содержащим `orderId/reservationId/paymentId/customerId/email/total`; результат — `CONFIRMED` с ids.
+- ветка `FAILED_INVENTORY` (reserve кинул): `payments.charge` и `inventory.release` не вызываются; failOrder пишет `UPDATE … FAILED_INVENTORY` и `OrderFailed` outbox без `reservationId`; ответ — `FAILED_INVENTORY` с reason.
+- ветка `FAILED_PAYMENT` (reserve ок, charge кинул): `inventory.release` вызывается с idempotency-key, оканчивающимся на `:release` (это `<reserveKey>:release`); failOrder пишет `FAILED_PAYMENT` и `OrderFailed` с `reservationId`; ответ — `FAILED_PAYMENT` с reason.
+- закреплённый контракт `InventoryClient.release` не бросает: если бросит — failOrder не отработает и заказ останется `PENDING`. Тест документирует это поведение.
+- `recoverStuckOrders`: возвращает 0 без транзакций, если нет «зависших»; SELECT использует `sagaTimeoutSec` из конфига; на каждую строку запускает `failOrder(FAILED_TIMEOUT, …)` с сохранением `reservationId`, payload `OrderFailed` без `reservationId` если его в строке не было.
+- `getOrder`: `null` при пустом результате, первая строка при наличии.
+
+**`outbox.publisher.spec.ts` — `OutboxPublisher`** (моки pg и kafka, `withSpan` тоже замокан, чтобы заглянуть в `parentTraceparent`):
+- `onModuleInit` регистрирует интервал под именем `orders-outbox-publisher`.
+- `tick` селектит `FROM orders_outbox` с `published_at IS NULL` и `FOR UPDATE SKIP LOCKED`.
+- На успешном `producer.send` каждая строка превращается в конверт `{ eventId, eventType, occurredAt, payload }`, в Kafka летит с `key = aggregate_id` и `topic = orders.events`, затем `UPDATE orders_outbox SET published_at = NOW()` ровно по этой строке.
+- Если `producer.send` упал — выполняется `SET attempts = attempts + 1` без `published_at`.
+- `row.trace_context` пробрасывается в `withSpan` как `parentTraceparent` (восстановление родителя спана после outbox-границы).
+- Защита от наложения тиков: пока первый `tick` висит на SELECT, второй вызов выходит сразу через guard `running` — повторного SELECT не происходит.
+
+**`saga-recovery.service.spec.ts` — `SagaRecoveryService`** (fake timers, мок `OrdersService`):
+- `onModuleInit` регистрирует один интервал под именем `orders-saga-recovery`.
+- На каждый тик (раз в 15 с) дергается `recoverStuckOrders`.
+- Ошибку из `recoverStuckOrders` глотает с `logger.error`, интервал продолжает жить — следующий тик отрабатывает.
+
+### Integration (`apps/orders/src/*.int-spec.ts`)
+
+Те же три файла, но против настоящей Postgres из контейнера. Между тестами — `truncateOrders(pg)`.
+
+**`orders.service.int-spec.ts`** — проверяет, что `OrdersService` действительно пишет ожидаемые строки:
+- happy path: после `createOrder` в `orders` лежит строка `CONFIRMED` с `reservation_id`, `payment_id`, `total='19.00'`; в `orders_outbox` ровно одна строка `OrderConfirmed` с `published_at IS NULL` и нужным payload.
+- `FAILED_INVENTORY`: в `orders` — `FAILED_INVENTORY` без `reservation_id/payment_id`, в outbox — `OrderFailed` без `reservationId`; `inventory.release` и `payments.charge` не вызывались.
+- `FAILED_PAYMENT`: `inventory.release` вызвался с правильным `reservationId`, в `orders` — `FAILED_PAYMENT` со ссылкой на reservation, в outbox — `OrderFailed` с `reservationId`.
+- атомарность CONFIRMED + outbox: через хук на `withTransaction` второй query в транзакции принудительно падает; проверяется, что `UPDATE orders` откатился (статус остался `PENDING`) и в `orders_outbox` ноль строк. INSERT `PENDING` до транзакции — не откатывается, это ожидаемо.
+
+**`outbox.publisher.int-spec.ts`** — Kafka мокается, Postgres настоящая:
+- одиночный издатель публикует все непубликованные строки ровно по разу, `eventId` совпадают со вставленными id; `published_at IS NULL` исчезает.
+- при провале `producer.send` строка остаётся неопубликованной, `attempts` инкрементнулся до 1.
+- задокументированная гонка двух publishers: SELECT через `pool.query` авто-коммитится и снимает `FOR UPDATE SKIP LOCKED` раньше, чем стартует `UPDATE`, поэтому два параллельных publisher'а через детерминированные барьеры (без `setTimeout`) видят одни и те же строки и дважды отправляют их в Kafka (`send.mock.calls.length > N`). Все строки в итоге помечены `published_at` — eventually-correct. Тест пиннит текущее поведение; если SELECT+UPDATE завернут в одну транзакцию, тест станет `toBe(N)`.
+
+**`saga-recovery.int-spec.ts`** — `OrdersService.recoverStuckOrders` против реальной Postgres:
+- старый `PENDING` (age = 100 с при `sagaTimeoutSec=60`) уезжает в `FAILED_TIMEOUT` с `error LIKE '%saga recovery%'`, в outbox появляется `OrderFailed` с тем же `reservationId`; свежий `PENDING` (age = 10 с) не трогается.
+- повторный прогон по тому же набору возвращает 0 — `WHERE status='PENDING'` выступает естественным guard, в outbox по-прежнему одна строка.
+- задокументированный дубль: ручной `failOrder(FAILED_PAYMENT)` + последующий `failOrder(FAILED_TIMEOUT)` для того же заказа дают две `OrderFailed`-строки в outbox (статус — last-writer-wins). Kafka-консьюмеры дедуплицируют по `eventId`, downstream видит одно событие, но в самой таблице — две строки. Тест фиксирует это до тех пор, пока в `failOrder` не появится status-guard.
+
 ## Структура
 
 ```
