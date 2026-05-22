@@ -16,49 +16,76 @@ declare global {
 }
 
 const REPO_ROOT = join(__dirname, '..', '..');
+const SERVICES = ['orders', 'payments', 'inventory', 'notifications'] as const;
+type Service = (typeof SERVICES)[number];
 
-function extractOrdersSchema(): string {
+function extractSchema(service: Service): string {
   const sql = readFileSync(join(REPO_ROOT, 'scripts', 'init-db.sql'), 'utf8');
-  // init-db.sql has `\c orders` then schema, then `-- ====` block separator.
-  // Extract everything between `\c orders` and the next section header.
-  const m = sql.match(/\\c\s+orders\s+([\s\S]*?)\n--\s*=/);
-  if (!m) {
-    throw new Error(
-      'Could not extract orders schema from scripts/init-db.sql; ' +
-        'expected `\\c orders` followed by `-- =` separator.',
-    );
-  }
+  // Sections in init-db.sql start with `\c <service>` and end either at the
+  // next `-- =` separator or at end of file (notifications is last).
+  const re = new RegExp(
+    String.raw`\\c\s+${service}\s+([\s\S]*?)(?=\n--\s*=|$)`,
+  );
+  const m = sql.match(re);
+  if (!m) throw new Error(`No schema for ${service} in scripts/init-db.sql`);
   return m[1];
+}
+
+function dsnFor(baseUri: string, db: string): string {
+  // PostgreSqlContainer.getConnectionUri() returns .../test by default.
+  return baseUri.replace(/\/[^/]+$/, '/' + db);
 }
 
 export default async function globalSetup(): Promise<void> {
   const pg = await new PostgreSqlContainer('postgres:16-alpine')
-    .withDatabase('orders')
     .withUsername('test')
     .withPassword('test')
     .start();
 
   const redis = await new RedisContainer('redis:7-alpine').start();
 
-  const dsn = pg.getConnectionUri();
+  const bootstrapUri = pg.getConnectionUri();
 
-  const client = new Client({ connectionString: dsn });
-  await client.connect();
+  // Create per-service databases from the bootstrap connection.
+  const root = new Client({ connectionString: bootstrapUri });
+  await root.connect();
   try {
-    await client.query(extractOrdersSchema());
+    for (const db of SERVICES) {
+      await root.query(`CREATE DATABASE ${db}`);
+    }
   } finally {
-    await client.end();
+    await root.end();
   }
 
+  // Apply each schema fragment to its own DB.
+  for (const db of SERVICES) {
+    const client = new Client({ connectionString: dsnFor(bootstrapUri, db) });
+    await client.connect();
+    try {
+      await client.query(extractSchema(db));
+    } finally {
+      await client.end();
+    }
+  }
+
+  // Run orders migrations on top of the seeded schema.
   await pgMigrate({
-    databaseUrl: dsn,
+    databaseUrl: dsnFor(bootstrapUri, 'orders'),
     dir: join(REPO_ROOT, 'migrations', 'orders'),
     direction: 'up',
     migrationsTable: 'pgmigrations',
     log: () => {},
   });
 
-  process.env.DATABASE_URL = dsn;
+  process.env.DATABASE_URL_ORDERS = dsnFor(bootstrapUri, 'orders');
+  process.env.DATABASE_URL_PAYMENTS = dsnFor(bootstrapUri, 'payments');
+  process.env.DATABASE_URL_INVENTORY = dsnFor(bootstrapUri, 'inventory');
+  process.env.DATABASE_URL_NOTIFICATIONS = dsnFor(
+    bootstrapUri,
+    'notifications',
+  );
+  // Backwards-compat for older orders tests that read DATABASE_URL.
+  process.env.DATABASE_URL = process.env.DATABASE_URL_ORDERS;
   process.env.REDIS_URL = redis.getConnectionUrl();
 
   globalThis.__PG_CONTAINER__ = pg;
