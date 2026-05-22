@@ -98,16 +98,23 @@ Dev-режим (без контейнеров) — поднять Postgres/Redis
 
 ## Тестирование
 
-Покрыт только `apps/orders` — там, где живёт сага. Jest разведён на два проекта через `jest.config.ts`:
+Покрыты все четыре сервиса — **109 тестов** (82 unit + 27 integration). Jest разведён на два проекта через `jest.config.ts`:
 
 | Группа | Регистр | Команда | Окружение |
 |---|---|---|---|
-| `unit` | `*.spec.ts` | `npm run test:unit` | Только моки (`test/helpers/mock-factories.ts`): `PgService`, `KafkaProducerService`, `SchedulerRegistry`, HTTP-клиенты `inventory`/`payments`. |
-| `integration` | `*.int-spec.ts` | `npm run test:integration` | `globalSetup` поднимает Postgres 16 и Redis 7 через `testcontainers`, накатывает схему из `scripts/init-db.sql` + миграции `migrations/orders`. Kafka не поднимается — продьюсер мокается. `--runInBand`, `testTimeout: 60s`. |
+| `unit` | `*.spec.ts` | `npm run test:unit` | Только моки. Фабрики в `test/helpers/mock-factories.ts`: `createMockPg` (включая `txClientQuery` для проверки `withTransaction`), `createMockRedis` (с `raw().get/set` и `claimIdempotency`), `createMockKafkaProducer`, `pgResult()` для типобезопасных `QueryResult`. |
+| `integration` | `*.int-spec.ts` | `npm run test:integration` | `globalSetup` поднимает один Postgres 16 и Redis 7 через `testcontainers`, создаёт 4 базы (`orders`/`payments`/`inventory`/`notifications`), накатывает на каждую её секцию из `scripts/init-db.sql`, для `orders` ещё прогоняет миграции `migrations/orders`. Kafka не поднимается — продьюсер/консьюмер мокаются. `--runInBand`, `testTimeout: 60s`. |
 
 `npm test` запускает обе группы. `npm run test:cov` — с покрытием.
 
-### Unit (`apps/orders/src/*.spec.ts`)
+**Тестовые хелперы** (`test/helpers/`):
+- `createTestPg(service)` — реальный `PgService`, привязанный к базе сервиса через `DATABASE_URL_<SERVICE>`; дефолт — `orders`.
+- `createTestRedis()` — реальный `RedisService` к контейнеру.
+- `truncate(pg, ...tables)` плюс шорткаты `truncateOrders`/`truncatePayments`/`truncateReservations`/`truncateNotifications` — обнуление таблиц между тестами без рестарта контейнера.
+
+### Unit (`apps/*/src/*.spec.ts`)
+
+#### `apps/orders` (32 теста, 4 файла)
 
 **`orders.controller.spec.ts` — `OrdersController`** (тонкая обёртка над сервисом):
 - `POST /` пробрасывает DTO в `service.createOrder` и возвращает его результат как есть.
@@ -115,7 +122,7 @@ Dev-режим (без контейнеров) — поднять Postgres/Redis
 - `GET /:id` бросает `NotFoundException` с текстом `Order <id> not found`, если сервис вернул `null`.
 
 **`orders.service.spec.ts` — `OrdersService`** (ядро саги, всё на моках pg/inventory/payments):
-- happy path (5 проверок одного прогона): `INSERT orders` с `PENDING` и корректным `total`; idempotency-key вида `<orderId>:<attemptId>`, оба UUID, один и тот же ключ улетает в `reserve` и `charge`; `ttlSec` из конфига (а не зашитые 900); `amount` в `charge` равен подсчитанному total; `release` не дергается; `withTransaction` ровно один с двумя запросами — `UPDATE orders … CONFIRMED` и `INSERT orders_outbox` с `event_type='OrderConfirmed'` и payload, содержащим `orderId/reservationId/paymentId/customerId/email/total`; результат — `CONFIRMED` с ids.
+- happy path (5 проверок одного прогона): `INSERT orders` с `PENDING` и корректным `total`; idempotency-key вида `<orderId>:<attemptId>`, оба UUID, один и тот же ключ улетает в `reserve` и `charge`; `ttlSec` из конфига (значение специально не равно дефолту); `amount` в `charge` равен подсчитанному total; `release` не дергается; `withTransaction` ровно один с двумя запросами — `UPDATE orders … CONFIRMED` и `INSERT orders_outbox` с `event_type='OrderConfirmed'` и payload, содержащим `orderId/reservationId/paymentId/customerId/email/total`; результат — `CONFIRMED` с ids.
 - ветка `FAILED_INVENTORY` (reserve кинул): `payments.charge` и `inventory.release` не вызываются; failOrder пишет `UPDATE … FAILED_INVENTORY` и `OrderFailed` outbox без `reservationId`; ответ — `FAILED_INVENTORY` с reason.
 - ветка `FAILED_PAYMENT` (reserve ок, charge кинул): `inventory.release` вызывается с idempotency-key, оканчивающимся на `:release` (это `<reserveKey>:release`); failOrder пишет `FAILED_PAYMENT` и `OrderFailed` с `reservationId`; ответ — `FAILED_PAYMENT` с reason.
 - закреплённый контракт `InventoryClient.release` не бросает: если бросит — failOrder не отработает и заказ останется `PENDING`. Тест документирует это поведение.
@@ -135,31 +142,120 @@ Dev-режим (без контейнеров) — поднять Postgres/Redis
 - На каждый тик (раз в 15 с) дергается `recoverStuckOrders`.
 - Ошибку из `recoverStuckOrders` глотает с `logger.error`, интервал продолжает жить — следующий тик отрабатывает.
 
-### Integration (`apps/orders/src/*.int-spec.ts`)
+#### `apps/payments` (16 тестов, 2 файла)
 
-Те же три файла, но против настоящей Postgres из контейнера. Между тестами — `truncateOrders(pg)`.
+**`payments.controller.spec.ts` — `PaymentsController`**:
+- `POST /charge` без `Idempotency-Key` бросает `BadRequestException`.
+- `POST /charge` с заголовком — пробрасывает DTO и ключ в `service.charge`, возвращает результат.
+- `POST /refund` — пробрасывает DTO.
+- `GET /by-order/:orderId` — возвращает строку или бросает `NotFoundException('No payment for this order')`.
 
-**`orders.service.int-spec.ts`** — проверяет, что `OrdersService` действительно пишет ожидаемые строки:
+**`payments.service.spec.ts` — `PaymentsService`** (моки pg + redis; `Math.random` через `jest.spyOn`, `afterEach(restoreAllMocks)`):
+- `charge` — cache hit в Redis (`pay:idem:<key>`): возвращает закэшированное, ни одного запроса в pg.
+- `charge` — `Math.random() < failureRate` (взят 0.5, mock `Math.random` отдаёт 0.1): `BadGatewayException('Simulated payment provider failure')`, ни одного запроса в pg.
+- `charge` — happy: `INSERT INTO payments … ON CONFLICT (idempotency_key) DO NOTHING` с правильными параметрами, последующий `SELECT id, status …`, результат кэшируется в Redis с TTL 24 ч.
+- `charge` — параллельный путь ON CONFLICT: INSERT — no-op, SELECT отдаёт чужую строку → возвращаем её `paymentId`, всё равно кэшируем в Redis для следующего вызова.
+- `charge` — если re-read внезапно ничего не нашёл: `BadGatewayException('Failed to persist payment')`, Redis не кэшируется.
+- `refund` — `NotFoundException` если строки нет; идемпотентен на `REFUNDED` (только SELECT, без UPDATE); на статусе `FAILED` бросает `BadGatewayException('Cannot refund payment in FAILED')`; на `CHARGED` — `UPDATE payments SET status='REFUNDED'`.
+- `getByOrder` — первая строка или `null`.
+
+#### `apps/inventory` (28 тестов, 4 файла)
+
+**`inventory.controller.spec.ts` — `InventoryController`**:
+- `POST /reserve` без `Idempotency-Key` бросает `BadRequestException`.
+- `POST /reserve`, `POST /release`, `POST /commit` — пробрасывают DTO в сервис.
+
+**`inventory.service.spec.ts` — `InventoryService`** (моки pg + redis):
+- `reserve` — cache hit (`inv:idem:<key>`): возвращает закэшированное, `withTransaction` не вызывается.
+- `reserve` — insufficient stock (первый `UPDATE inventory_items` отдал rowCount=0): `ConflictException('Insufficient stock for SKU SKU-A')` — имя первого SKU **в отсортированном порядке** (важная защита от deadlock).
+- `reserve` — happy: SKU обновляются в порядке `['SKU-A','SKU-M','SKU-Z']` (входной список перемешан) с правильными `qty`, потом `INSERT INTO reservations` с `items` в том же отсортированном порядке; результат кэшируется в Redis с TTL 24 ч.
+- `release` — `NotFoundException` при отсутствии; на `PENDING` обновляет stock и переводит в `RELEASED`; на `COMMITTED`/`RELEASED`/`EXPIRED` — no-op (idempotent, параметризованный тест через `it.each`).
+- `commit` — `NotFoundException` при отсутствии; `COMMITTED` — no-op; `RELEASED`/`EXPIRED` — `ConflictException`; `PENDING` — `reserved → sold` для каждой позиции, затем `UPDATE reservations SET status='COMMITTED'`.
+- `expirePending` — пустой набор → 0 без транзакций; для каждой строки старше `expires_at` вызывается `release`.
+
+**`inventory.reaper.spec.ts` — `InventoryReaper`** (fake timers):
+- `onModuleInit` регистрирует интервал `inventory-ttl-reaper`.
+- Каждый тик (30 с) вызывает `inventory.expirePending`.
+- Ошибки `expirePending` логируются `logger.error('Reaper failed: …')` и не останавливают цикл.
+
+**`inventory.consumer.spec.ts` — `InventoryConsumer`** (мок `KafkaConsumerService`, ловим зарегистрированный `EnvelopeHandler`):
+- Дубль по `eventId` (Redis `claimIdempotency` вернул `false`) — пропуск, без вызовов сервиса.
+- `OrderConfirmed` → `inventory.commit({ reservationId })` из payload.
+- `OrderFailed` с `reservationId` → `inventory.release({ reservationId })` (компенсация Layer 3).
+- `OrderFailed` без `reservationId` → no-op (inventory тут уже не при делах).
+
+#### `apps/notifications` (6 тестов, 2 файла)
+
+**`notifications.service.spec.ts` — `NotificationsService`**:
+- `sendOrderConfirmedEmail` — `INSERT INTO notifications` с `channel='email'`, `subject='Order confirmed'`, и точным body `Your order <id> for $<total> is confirmed.`.
+- `sendOrderFailedEmail` без email — ранний return, без `INSERT`.
+- `sendOrderFailedEmail` с email — `INSERT … subject='Order failed'`, body `Order <id> failed: <reason>`.
+
+**`notifications.consumer.spec.ts` — `NotificationsConsumer`**:
+- Дубль по `eventId` — пропуск.
+- `OrderConfirmed` → `sendOrderConfirmedEmail({ orderId, email, total })`.
+- `OrderFailed` → `sendOrderFailedEmail({ orderId, email, reason })`.
+- Неизвестный `eventType` — no-op.
+
+### Integration (`apps/*/src/*.int-spec.ts`)
+
+`beforeEach` — truncate целевых таблиц и подчистка Redis-ключей в неймспейсе сервиса (`pay:idem:*`/`inv:idem:*`).
+
+#### `apps/orders/src/orders.service.int-spec.ts`
+
 - happy path: после `createOrder` в `orders` лежит строка `CONFIRMED` с `reservation_id`, `payment_id`, `total='19.00'`; в `orders_outbox` ровно одна строка `OrderConfirmed` с `published_at IS NULL` и нужным payload.
 - `FAILED_INVENTORY`: в `orders` — `FAILED_INVENTORY` без `reservation_id/payment_id`, в outbox — `OrderFailed` без `reservationId`; `inventory.release` и `payments.charge` не вызывались.
 - `FAILED_PAYMENT`: `inventory.release` вызвался с правильным `reservationId`, в `orders` — `FAILED_PAYMENT` со ссылкой на reservation, в outbox — `OrderFailed` с `reservationId`.
 - атомарность CONFIRMED + outbox: через хук на `withTransaction` второй query в транзакции принудительно падает; проверяется, что `UPDATE orders` откатился (статус остался `PENDING`) и в `orders_outbox` ноль строк. INSERT `PENDING` до транзакции — не откатывается, это ожидаемо.
 
-**`outbox.publisher.int-spec.ts`** — Kafka мокается, Postgres настоящая:
+#### `apps/orders/src/outbox.publisher.int-spec.ts` (Kafka мокается, Postgres настоящая)
+
 - одиночный издатель публикует все непубликованные строки ровно по разу, `eventId` совпадают со вставленными id; `published_at IS NULL` исчезает.
 - при провале `producer.send` строка остаётся неопубликованной, `attempts` инкрементнулся до 1.
 - задокументированная гонка двух publishers: SELECT через `pool.query` авто-коммитится и снимает `FOR UPDATE SKIP LOCKED` раньше, чем стартует `UPDATE`, поэтому два параллельных publisher'а через детерминированные барьеры (без `setTimeout`) видят одни и те же строки и дважды отправляют их в Kafka (`send.mock.calls.length > N`). Все строки в итоге помечены `published_at` — eventually-correct. Тест пиннит текущее поведение; если SELECT+UPDATE завернут в одну транзакцию, тест станет `toBe(N)`.
 
-**`saga-recovery.int-spec.ts`** — `OrdersService.recoverStuckOrders` против реальной Postgres:
+#### `apps/orders/src/saga-recovery.int-spec.ts`
+
 - старый `PENDING` (age = 100 с при `sagaTimeoutSec=60`) уезжает в `FAILED_TIMEOUT` с `error LIKE '%saga recovery%'`, в outbox появляется `OrderFailed` с тем же `reservationId`; свежий `PENDING` (age = 10 с) не трогается.
 - повторный прогон по тому же набору возвращает 0 — `WHERE status='PENDING'` выступает естественным guard, в outbox по-прежнему одна строка.
 - задокументированный дубль: ручной `failOrder(FAILED_PAYMENT)` + последующий `failOrder(FAILED_TIMEOUT)` для того же заказа дают две `OrderFailed`-строки в outbox (статус — last-writer-wins). Kafka-консьюмеры дедуплицируют по `eventId`, downstream видит одно событие, но в самой таблице — две строки. Тест фиксирует это до тех пор, пока в `failOrder` не появится status-guard.
+
+#### `apps/payments/src/payments.service.int-spec.ts`
+
+- `charge` — первый вызов вставляет строку, второй с тем же `idemKey` возвращает закэшированное в Redis, в БД по-прежнему одна строка.
+- `charge` — конкурентный путь: оба `Promise.all`-вызова форсятся в cache-miss через `spyOn(redis.raw(), 'get')`, оба идут в Postgres → ON CONFLICT (idempotency_key) обеспечивает ровно одну строку, оба возвращают одинаковый `paymentId`.
+- `charge` кэширует результат с TTL 24 ч (проверяется в диапазоне с допуском на drift).
+- `refund` — `CHARGED → REFUNDED`, повторный refund idempotent (без второго UPDATE).
+- `refund` платежа в `FAILED` (вставленного руками) — `BadGatewayException('Cannot refund payment in FAILED')`.
+
+#### `apps/inventory/src/inventory.service.int-spec.ts`
+
+`beforeEach` сидит каталог `SKU-A: 100`, `SKU-B: 50`, `SKU-C: 200`.
+
+- `reserve` happy: `available` уменьшен, `reserved` увеличен ровно на запрошенное qty по каждому SKU; остальные SKU не трогаются; в `reservations` одна строка `PENDING` с `expires_at` в будущем.
+- `reserve` insufficient stock: `ConflictException`, `inventory_items` без изменений, `reservations` пуст (rollback транзакции).
+- `reserve` идемпотентен по `idemKey`: второй вызов возвращает тот же `reservationId`, без двойного декремента stock, в `reservations` одна строка.
+- `release` — `PENDING → RELEASED`, stock возвращён; повторный `release` — no-op, stock не задваивается.
+- `commit` — `PENDING → COMMITTED`, `reserved → sold`; commit после release — `ConflictException`.
+- `expirePending` — для `PENDING` с back-дейченым `expires_at = NOW() - 1 hour` срабатывает: статус `RELEASED`, stock восстановлен; на свежих `PENDING` (`ttlSec=3600`) ничего не происходит.
+
+#### `apps/notifications/src/notifications.service.int-spec.ts`
+
+- `sendOrderConfirmedEmail` создаёт ряд с `channel='email'`, `subject='Order confirmed'`, точным body.
+- `sendOrderFailedEmail` с email создаёт ряд с `subject='Order failed'`, body содержит причину.
+- `sendOrderFailedEmail` без email — ноль рядов в таблице.
 
 ## Структура
 
 ```
 apps/{orders,payments,inventory,notifications}/src   — сервисы (controller, service, consumer, …)
-libs/common/src/{db,redis,kafka,events}              — общие клиенты и контракты
+apps/*/src/*.spec.ts                                 — unit-тесты рядом с кодом
+apps/*/src/*.int-spec.ts                             — integration-тесты против реальных Pg + Redis
+libs/common/src/{db,redis,kafka,events,otel,logger}  — общие клиенты и контракты
+test/setup/{global-setup,global-teardown}.ts         — testcontainers (Pg + Redis), создаёт 4 БД, накатывает init-db.sql + migrations/orders
+test/helpers/                                        — mock-factories, createTestPg(service), truncate(...)
+jest.config.ts                                       — два projects: unit и integration
+migrations/orders                                    — node-pg-migrate, миграции схемы orders
 scripts/init-db.sql                                  — схема всех 4 БД + сидинг каталога
 Dockerfile                                           — мульти-стейдж, параметризуется SERVICE arg
 docker-compose.yml                                   — инфра + 4 сервиса
