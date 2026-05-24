@@ -24,9 +24,11 @@
     "test:unit": "jest --selectProjects unit",
     "test:integration": "jest --selectProjects integration --runInBand",
     "test:cov": "jest --coverage",
-    "migrate:orders:up": "node-pg-migrate up -m migrations/orders -j js",
-    "migrate:orders:down": "node-pg-migrate down -m migrations/orders -j js",
-    "migrate:orders:create": "node-pg-migrate create -m migrations/orders -j js"
+    "prisma:orders:generate": "prisma generate --schema apps/orders/prisma/schema.prisma",
+    "prisma:orders:migrate:dev": "prisma migrate dev --schema apps/orders/prisma/schema.prisma",
+    "prisma:orders:migrate:deploy": "prisma migrate deploy --schema apps/orders/prisma/schema.prisma",
+    "prisma:orders:migrate:status": "prisma migrate status --schema apps/orders/prisma/schema.prisma",
+    "prisma:orders:studio": "prisma studio --schema apps/orders/prisma/schema.prisma"
   },
   "dependencies": {
     "@itgorillaz/configify": "^4.1.2",
@@ -48,10 +50,12 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
     "ioredis": "^5.4.1",
+    "@prisma/client": "^6.1.0",
     "kafkajs": "^2.2.4",
     "nestjs-pino": "^4.6.1",
     "node-pg-migrate": "^8.0.4",
     "pg": "^8.13.1",
+    "prisma": "^6.1.0",
     "pino": "^10.3.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",

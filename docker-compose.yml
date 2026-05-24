@@ -137,7 +137,7 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/orders
     command:
-      ["node", "node_modules/node-pg-migrate/bin/node-pg-migrate.js", "up", "-m", "migrations/orders", "-j", "js"]
+      ["npx", "prisma", "migrate", "deploy", "--schema=_prisma/schema.prisma"]
     depends_on:
       postgres: { condition: service_healthy }
     restart: "no"
