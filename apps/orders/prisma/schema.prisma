@@ -6,9 +6,7 @@
 
 generator client {
   provider = "prisma-client-js"
-  // Single Prisma schema in the repo for now. When a second service adopts
-  // Prisma, switch each generator to a distinct `output` path
-  // (e.g. "../../../node_modules/.prisma/client-orders") to avoid clobbering.
+  output   = "../../../node_modules/.prisma/client-orders"
 }
 
 datasource db {

@@ -28,7 +28,22 @@
     "prisma:orders:migrate:dev": "prisma migrate dev --schema apps/orders/prisma/schema.prisma",
     "prisma:orders:migrate:deploy": "prisma migrate deploy --schema apps/orders/prisma/schema.prisma",
     "prisma:orders:migrate:status": "prisma migrate status --schema apps/orders/prisma/schema.prisma",
-    "prisma:orders:studio": "prisma studio --schema apps/orders/prisma/schema.prisma"
+    "prisma:orders:studio": "prisma studio --schema apps/orders/prisma/schema.prisma",
+    "prisma:payments:generate": "prisma generate --schema apps/payments/prisma/schema.prisma",
+    "prisma:payments:migrate:dev": "prisma migrate dev --schema apps/payments/prisma/schema.prisma",
+    "prisma:payments:migrate:deploy": "prisma migrate deploy --schema apps/payments/prisma/schema.prisma",
+    "prisma:payments:migrate:status": "prisma migrate status --schema apps/payments/prisma/schema.prisma",
+    "prisma:payments:studio": "prisma studio --schema apps/payments/prisma/schema.prisma",
+    "prisma:inventory:generate": "prisma generate --schema apps/inventory/prisma/schema.prisma",
+    "prisma:inventory:migrate:dev": "prisma migrate dev --schema apps/inventory/prisma/schema.prisma",
+    "prisma:inventory:migrate:deploy": "prisma migrate deploy --schema apps/inventory/prisma/schema.prisma",
+    "prisma:inventory:migrate:status": "prisma migrate status --schema apps/inventory/prisma/schema.prisma",
+    "prisma:inventory:studio": "prisma studio --schema apps/inventory/prisma/schema.prisma",
+    "prisma:notifications:generate": "prisma generate --schema apps/notifications/prisma/schema.prisma",
+    "prisma:notifications:migrate:dev": "prisma migrate dev --schema apps/notifications/prisma/schema.prisma",
+    "prisma:notifications:migrate:deploy": "prisma migrate deploy --schema apps/notifications/prisma/schema.prisma",
+    "prisma:notifications:migrate:status": "prisma migrate status --schema apps/notifications/prisma/schema.prisma",
+    "prisma:notifications:studio": "prisma studio --schema apps/notifications/prisma/schema.prisma"
   },
   "dependencies": {
     "@itgorillaz/configify": "^4.1.2",

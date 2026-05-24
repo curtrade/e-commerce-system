@@ -170,6 +170,20 @@ services:
       orders-migrate: { condition: service_completed_successfully }
     restart: unless-stopped
 
+  payments-migrate:
+    build:
+      context: .
+      args:
+        SERVICE: payments
+    container_name: ecommerce-payments-migrate
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/payments
+    command:
+      ["npx", "prisma", "migrate", "deploy", "--schema=_prisma/schema.prisma"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
+
   payments:
     build:
       context: .
@@ -190,7 +204,22 @@ services:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
       otel-collector: { condition: service_started }
+      payments-migrate: { condition: service_completed_successfully }
     restart: unless-stopped
+
+  inventory-migrate:
+    build:
+      context: .
+      args:
+        SERVICE: inventory
+    container_name: ecommerce-inventory-migrate
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/inventory
+    command:
+      ["npx", "prisma", "migrate", "deploy", "--schema=_prisma/schema.prisma"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
 
   inventory:
     build:
@@ -213,7 +242,22 @@ services:
       redis:    { condition: service_healthy }
       kafka:    { condition: service_healthy }
       otel-collector: { condition: service_started }
+      inventory-migrate: { condition: service_completed_successfully }
     restart: unless-stopped
+
+  notifications-migrate:
+    build:
+      context: .
+      args:
+        SERVICE: notifications
+    container_name: ecommerce-notifications-migrate
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/notifications
+    command:
+      ["npx", "prisma", "migrate", "deploy", "--schema=_prisma/schema.prisma"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
 
   notifications:
     build:
@@ -237,6 +281,7 @@ services:
       redis:    { condition: service_healthy }
       kafka:    { condition: service_healthy }
       otel-collector: { condition: service_started }
+      notifications-migrate: { condition: service_completed_successfully }
     restart: unless-stopped
 
 volumes:

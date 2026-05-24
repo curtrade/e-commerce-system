@@ -1,0 +1,36 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../../node_modules/.prisma/client-inventory"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model InventoryItem {
+  sku       String   @id
+  available Int
+  reserved  Int      @default(0)
+  sold      Int      @default(0)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  // CHECK constraints (available >= 0, reserved >= 0, sold >= 0) cannot be
+  // expressed in Prisma schema syntax — they live in the baseline migration
+  // SQL only.
+
+  @@map("inventory_items")
+}
+
+model Reservation {
+  id        String   @id @db.Uuid
+  orderId   String   @map("order_id")
+  items     Json     @db.JsonB
+  status    String
+  expiresAt DateTime @map("expires_at") @db.Timestamptz()
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  @@index([status, expiresAt], map: "reservations_status_expiry_idx")
+  @@map("reservations")
+}

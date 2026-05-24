@@ -9,7 +9,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Response } from 'express';
-import { Prisma } from '.prisma/client-orders';
+import { Prisma } from '.prisma/client-payments';
 
 @Catch(Prisma.PrismaClientKnownRequestError)
 export class PrismaExceptionFilter implements ExceptionFilter {
@@ -40,7 +40,6 @@ export class PrismaExceptionFilter implements ExceptionFilter {
         return;
       }
       default: {
-        // Log the raw Prisma error server-side; never leak code/meta to the client.
         this.logger.error(
           `Unhandled Prisma error ${err.code}: ${err.message}`,
           err.stack,
