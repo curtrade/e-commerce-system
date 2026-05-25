@@ -36,7 +36,8 @@ CREATE TABLE orders_outbox (
     payload         jsonb       NOT NULL,
     attempts        int         NOT NULL DEFAULT 0,
     created_at      timestamptz NOT NULL DEFAULT NOW(),
-    published_at    timestamptz
+    published_at    timestamptz,
+    trace_context   text
 );
 
 CREATE INDEX orders_outbox_unpublished_idx
