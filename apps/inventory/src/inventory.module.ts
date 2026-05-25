@@ -1,6 +1,5 @@
 import { ConfigifyModule } from '@itgorillaz/configify';
 import { Module } from '@nestjs/common';
-import { APP_FILTER } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 import {
   AppLoggerModule,
@@ -15,8 +14,6 @@ import { InventoryConsumer } from './inventory.consumer';
 import { InventoryController } from './inventory.controller';
 import { InventoryReaper } from './inventory.reaper';
 import { InventoryService } from './inventory.service';
-import { PrismaExceptionFilter } from './prisma/prisma-exception.filter';
-import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
   imports: [
@@ -29,7 +26,6 @@ import { PrismaModule } from './prisma/prisma.module';
         connectionString: cfg.databaseUrl,
       }),
     }),
-    PrismaModule,
     RedisModule.forRootAsync({
       inject: [AppConfiguration],
       useFactory: (cfg: AppConfiguration) => ({ url: cfg.redisUrl }),
@@ -40,10 +36,6 @@ import { PrismaModule } from './prisma/prisma.module';
     InventoryService,
     InventoryConsumer,
     InventoryReaper,
-    {
-      provide: APP_FILTER,
-      useClass: PrismaExceptionFilter,
-    },
     {
       provide: KafkaConsumerService,
       inject: [AppConfiguration],

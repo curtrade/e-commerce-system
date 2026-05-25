@@ -1,7 +1,6 @@
 import { ConfigifyModule } from '@itgorillaz/configify';
 import { HttpModule } from '@nestjs/axios';
 import { Module } from '@nestjs/common';
-import { APP_FILTER } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 import {
   AppLoggerModule,
@@ -16,8 +15,6 @@ import { HealthController } from './health.controller';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
 import { OutboxPublisher } from './outbox.publisher';
-import { PrismaExceptionFilter } from './prisma/prisma-exception.filter';
-import { PrismaModule } from './prisma/prisma.module';
 import { SagaRecoveryService } from './saga-recovery.service';
 
 @Module({
@@ -32,7 +29,6 @@ import { SagaRecoveryService } from './saga-recovery.service';
         connectionString: cfg.databaseUrl,
       }),
     }),
-    PrismaModule,
     RedisModule.forRootAsync({
       inject: [AppConfiguration],
       useFactory: (cfg: AppConfiguration) => ({ url: cfg.redisUrl }),
@@ -45,10 +41,6 @@ import { SagaRecoveryService } from './saga-recovery.service';
     PaymentsClient,
     OutboxPublisher,
     SagaRecoveryService,
-    {
-      provide: APP_FILTER,
-      useClass: PrismaExceptionFilter,
-    },
     {
       provide: KafkaProducerService,
       inject: [AppConfiguration],

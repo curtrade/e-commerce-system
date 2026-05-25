@@ -16,6 +16,9 @@ export class PrismaExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(PrismaExceptionFilter.name);
 
   catch(err: Prisma.PrismaClientKnownRequestError, host: ArgumentsHost): void {
+    if (host.getType() !== 'http') {
+      throw err;
+    }
     const res = host.switchToHttp().getResponse<Response>();
 
     switch (err.code) {

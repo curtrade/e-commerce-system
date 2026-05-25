@@ -8,6 +8,10 @@ const base = {
   roots: ['<rootDir>/apps/', '<rootDir>/libs/'],
   moduleNameMapper: {
     '^@app/common(|/.*)$': '<rootDir>/libs/common/src/$1',
+    '^\\.prisma/client-orders$': '<rootDir>/node_modules/.prisma/client-orders',
+    '^\\.prisma/client-payments$': '<rootDir>/node_modules/.prisma/client-payments',
+    '^\\.prisma/client-inventory$': '<rootDir>/node_modules/.prisma/client-inventory',
+    '^\\.prisma/client-notifications$': '<rootDir>/node_modules/.prisma/client-notifications',
   },
 } satisfies Config;
 

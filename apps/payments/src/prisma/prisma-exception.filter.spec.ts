@@ -1,6 +1,6 @@
 import { HttpStatus, Logger } from '@nestjs/common';
 import { ArgumentsHost } from '@nestjs/common';
-import { Prisma } from '.prisma/client-orders';
+import { Prisma } from '.prisma/client-payments';
 import { PrismaExceptionFilter } from './prisma-exception.filter';
 
 function makePrismaError(

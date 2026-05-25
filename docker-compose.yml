@@ -140,7 +140,7 @@ services:
       ["npx", "prisma", "migrate", "deploy", "--schema=_prisma/schema.prisma"]
     depends_on:
       postgres: { condition: service_healthy }
-    restart: "no"
+    restart: on-failure
 
   orders:
     build:
@@ -182,7 +182,7 @@ services:
       ["npx", "prisma", "migrate", "deploy", "--schema=_prisma/schema.prisma"]
     depends_on:
       postgres: { condition: service_healthy }
-    restart: "no"
+    restart: on-failure
 
   payments:
     build:
@@ -219,7 +219,7 @@ services:
       ["npx", "prisma", "migrate", "deploy", "--schema=_prisma/schema.prisma"]
     depends_on:
       postgres: { condition: service_healthy }
-    restart: "no"
+    restart: on-failure
 
   inventory:
     build:
@@ -257,7 +257,7 @@ services:
       ["npx", "prisma", "migrate", "deploy", "--schema=_prisma/schema.prisma"]
     depends_on:
       postgres: { condition: service_healthy }
-    restart: "no"
+    restart: on-failure
 
   notifications:
     build:

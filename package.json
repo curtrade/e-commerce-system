@@ -43,7 +43,9 @@
     "prisma:notifications:migrate:dev": "prisma migrate dev --schema apps/notifications/prisma/schema.prisma",
     "prisma:notifications:migrate:deploy": "prisma migrate deploy --schema apps/notifications/prisma/schema.prisma",
     "prisma:notifications:migrate:status": "prisma migrate status --schema apps/notifications/prisma/schema.prisma",
-    "prisma:notifications:studio": "prisma studio --schema apps/notifications/prisma/schema.prisma"
+    "prisma:notifications:studio": "prisma studio --schema apps/notifications/prisma/schema.prisma",
+    "prisma:generate": "npm run prisma:orders:generate && npm run prisma:payments:generate && npm run prisma:inventory:generate && npm run prisma:notifications:generate",
+    "prisma:migrate:deploy": "npm run prisma:orders:migrate:deploy && npm run prisma:payments:migrate:deploy && npm run prisma:inventory:migrate:deploy && npm run prisma:notifications:migrate:deploy"
   },
   "dependencies": {
     "@itgorillaz/configify": "^4.1.2",
