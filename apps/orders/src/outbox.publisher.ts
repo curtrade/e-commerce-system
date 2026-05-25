@@ -18,11 +18,16 @@ interface OutboxRow {
 }
 
 const POLL_INTERVAL_MS = 1000;
+const MAX_ATTEMPTS = 10;
+const BACKOFF_BASE_MS = 1_000;
+const BACKOFF_MAX_MS = 60_000;
 
 @Injectable()
 export class OutboxPublisher implements OnModuleInit {
   private readonly logger = new Logger(OutboxPublisher.name);
   private running = false;
+  private consecutiveFailures = 0;
+  private nextRetryAt = 0;
 
   constructor(
     private readonly pg: PgService,
@@ -39,32 +44,57 @@ export class OutboxPublisher implements OnModuleInit {
 
   private async tick(): Promise<void> {
     if (this.running) return;
+    if (Date.now() < this.nextRetryAt) return;
     this.running = true;
     try {
-      // SKIP LOCKED prevents two pollers from racing on the SELECT itself.
-      // NOTE: pg.query() goes through pool.query (auto-commit), so the row lock
-      // is released the moment the SELECT returns — it does NOT protect the
-      // for-loop below. Cross-replica double-publish protection requires
-      // wrapping the SELECT + UPDATE in a single transaction.
       const { rows } = await this.pg.query<OutboxRow>(
         `SELECT id, aggregate_id, topic, event_type, payload, trace_context, attempts
            FROM orders_outbox
           WHERE published_at IS NULL
+            AND attempts < $1
           ORDER BY created_at
           LIMIT 50
           FOR UPDATE SKIP LOCKED`,
+        [MAX_ATTEMPTS],
       );
+
+      let failed = false;
       for (const row of rows) {
-        await withSpan(
-          'orders-outbox',
-          'outbox.publish',
-          async (span) => {
-            span.setAttribute('outbox.row.id', row.id);
-            span.setAttribute('outbox.event_type', row.event_type);
-            return this.publishRow(row);
-          },
-          { parentTraceparent: row.trace_context },
-        );
+        try {
+          await withSpan(
+            'orders-outbox',
+            'outbox.publish',
+            async (span) => {
+              span.setAttribute('outbox.row.id', row.id);
+              span.setAttribute('outbox.event_type', row.event_type);
+              return this.publishRow(row);
+            },
+            { parentTraceparent: row.trace_context },
+          );
+        } catch (err) {
+          this.logger.error(
+            `Failed to publish outbox row ${row.id}: ${(err as Error).message}`,
+          );
+          if (row.attempts + 1 >= MAX_ATTEMPTS) {
+            this.logger.warn(
+              `Outbox row ${row.id} exhausted ${MAX_ATTEMPTS} attempts, will not be retried`,
+            );
+          }
+          this.consecutiveFailures++;
+          const delayMs = Math.min(
+            BACKOFF_BASE_MS * 2 ** this.consecutiveFailures,
+            BACKOFF_MAX_MS,
+          );
+          this.nextRetryAt = Date.now() + delayMs;
+          this.logger.warn(`Outbox backing off for ${delayMs}ms`);
+          failed = true;
+          break;
+        }
+      }
+
+      if (!failed && rows.length > 0) {
+        this.consecutiveFailures = 0;
+        this.nextRetryAt = 0;
       }
     } catch (err) {
       this.logger.error(`Outbox tick failed: ${(err as Error).message}`);
@@ -87,13 +117,11 @@ export class OutboxPublisher implements OnModuleInit {
         [row.id],
       );
     } catch (err) {
-      this.logger.error(
-        `Failed to publish outbox row ${row.id}: ${(err as Error).message}`,
-      );
       await this.pg.query(
         `UPDATE orders_outbox SET attempts = attempts + 1 WHERE id = $1`,
         [row.id],
       );
+      throw err;
     }
   }
 }

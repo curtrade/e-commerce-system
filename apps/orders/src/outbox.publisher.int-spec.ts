@@ -13,15 +13,19 @@ type Tick = () => Promise<void>;
 const tick = (p: OutboxPublisher): Tick =>
   (p as unknown as { tick: Tick }).tick.bind(p);
 
-async function insertOutboxRows(pg: PgService, n: number): Promise<string[]> {
+async function insertOutboxRows(
+  pg: PgService,
+  n: number,
+  attempts = 0,
+): Promise<string[]> {
   const ids: string[] = [];
   for (let i = 0; i < n; i++) {
     const id = randomUUID();
     ids.push(id);
     await pg.query(
-      `INSERT INTO orders_outbox (id, aggregate_id, topic, event_type, payload, trace_context)
-       VALUES ($1, $2, 'orders.events', 'OrderConfirmed', $3::jsonb, NULL)`,
-      [id, randomUUID(), JSON.stringify({ seq: i })],
+      `INSERT INTO orders_outbox (id, aggregate_id, topic, event_type, payload, trace_context, attempts)
+       VALUES ($1, $2, 'orders.events', 'OrderConfirmed', $3::jsonb, NULL, $4)`,
+      [id, randomUUID(), JSON.stringify({ seq: i }), attempts],
     );
   }
   return ids;
@@ -87,12 +91,42 @@ describe('OutboxPublisher (integration)', () => {
     expect(rows[0].published_at).toBeNull();
   });
 
+  it('rows at max attempts are skipped by the poller', async () => {
+    await insertOutboxRows(pg, 2, 10);
+    const producer = createMockKafkaProducer();
+    const pub = makePublisher(pg, producer.service);
+
+    await tick(pub)();
+
+    expect(producer.send).not.toHaveBeenCalled();
+
+    const { rows } = await pg.query<{ unpublished: string }>(
+      `SELECT COUNT(*)::int AS unpublished
+         FROM orders_outbox WHERE published_at IS NULL`,
+    );
+    expect(rows[0].unpublished).toBe(2);
+  });
+
+  it('circuit breaker: first failure stops the batch, remaining rows are not attempted', async () => {
+    await insertOutboxRows(pg, 3);
+    const producer = createMockKafkaProducer();
+    producer.send.mockRejectedValue(new Error('broker down'));
+    const pub = makePublisher(pg, producer.service);
+
+    await tick(pub)();
+
+    expect(producer.send).toHaveBeenCalledTimes(1);
+
+    const { rows } = await pg.query<{ cnt: number }>(
+      `SELECT COUNT(*)::int AS cnt FROM orders_outbox WHERE attempts > 0`,
+    );
+    expect(rows[0].cnt).toBe(1);
+  });
+
   // Documented race: pg.query() uses pool.query which auto-commits, so the
   // FOR UPDATE SKIP LOCKED row lock is released the moment SELECT returns —
   // BEFORE the for-loop calls publishRow. Two concurrent publishers can
   // therefore both observe the same unpublished rows and double-send.
-  //
-  // See apps/orders/src/outbox.publisher.ts:42-48 for the comment in source.
   //
   // If OutboxPublisher is ever refactored to wrap SELECT + UPDATE in a single
   // transaction, this test will start failing on the `>` assertion — change it
@@ -103,13 +137,6 @@ describe('OutboxPublisher (integration)', () => {
 
     const producer = createMockKafkaProducer();
 
-    // Deterministic barriers (no setTimeout):
-    //  - aFirstSend resolves when publisher A enters its first send call,
-    //    proving A has completed SELECT and reached publishRow.
-    //  - bFirstSend resolves when publisher B enters its first send call,
-    //    proving B has also SELECT'd the rows (while A is still held).
-    //  - aHeld blocks A's first send until we release, so A cannot UPDATE
-    //    published_at before B SELECTs.
     let releaseA!: () => void;
     let aFirstSendStarted!: () => void;
     let bFirstSendStarted!: () => void;
@@ -120,12 +147,9 @@ describe('OutboxPublisher (integration)', () => {
     producer.send.mockImplementation(async () => {
       const idx = producer.send.mock.calls.length;
       if (idx === 1) {
-        // A's first send — hold while signalling.
         aFirstSendStarted();
         await aHeld;
       } else if (idx === 2) {
-        // While A is held, the only producer making progress is B, so its
-        // first send is necessarily the 2nd send call observed.
         bFirstSendStarted();
       }
     });
@@ -140,23 +164,12 @@ describe('OutboxPublisher (integration)', () => {
     releaseA();
     await Promise.all([aPromise, bPromise]);
 
-    // Race proven: both publishers sent the same N rows → > N total sends.
-    // If OutboxPublisher is later refactored so SELECT + UPDATE share a tx,
-    // this becomes `toBe(N)` and the whole "race" comment in source can go.
     expect(producer.send.mock.calls.length).toBeGreaterThan(N);
 
-    // All rows still end up published (eventually-correct semantics).
     const { rows } = await pg.query<{ unpublished: string }>(
       `SELECT COUNT(*)::int AS unpublished
          FROM orders_outbox WHERE published_at IS NULL`,
     );
     expect(rows[0].unpublished).toBe(0);
   });
-
-  // NOTE: trace_context propagation into withSpan is covered honestly by the
-  // unit spec ("passes row.trace_context to withSpan as parentTraceparent"),
-  // where withSpan is mocked and its options can be inspected. At the
-  // integration level we have no observable side-effect of the OTel context
-  // beyond logs/spans, so a publish-side assertion here would not actually
-  // test trace_context restoration.
 });
