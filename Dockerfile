@@ -2,7 +2,7 @@
 # Single multi-stage Dockerfile for all four Nest apps in this monorepo.
 # Pass --build-arg SERVICE=orders|payments|inventory|notifications.
 
-ARG NODE_VERSION=22.12-alpine3.20
+ARG NODE_VERSION=22.16-alpine3.21
 
 # --- deps -----------------------------------------------------------------
 FROM node:${NODE_VERSION} AS deps
