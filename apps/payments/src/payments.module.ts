@@ -22,6 +22,8 @@ import { PaymentsService } from './payments.service';
     }),
   ],
   controllers: [HealthController, PaymentsController],
-  providers: [PaymentsService],
+  providers: [
+    PaymentsService,
+  ],
 })
 export class PaymentsModule {}

@@ -103,7 +103,7 @@ Dev-режим (без контейнеров) — поднять Postgres/Redis
 | Группа | Регистр | Команда | Окружение |
 |---|---|---|---|
 | `unit` | `*.spec.ts` | `npm run test:unit` | Только моки. Фабрики в `test/helpers/mock-factories.ts`: `createMockPg` (включая `txClientQuery` для проверки `withTransaction`), `createMockRedis` (с `raw().get/set` и `claimIdempotency`), `createMockKafkaProducer`, `pgResult()` для типобезопасных `QueryResult`. |
-| `integration` | `*.int-spec.ts` | `npm run test:integration` | `globalSetup` поднимает один Postgres 16 и Redis 7 через `testcontainers`, создаёт 4 базы (`orders`/`payments`/`inventory`/`notifications`), накатывает на каждую её секцию из `scripts/init-db.sql`, для `orders` ещё прогоняет миграции `migrations/orders`. Kafka не поднимается — продьюсер/консьюмер мокаются. `--runInBand`, `testTimeout: 60s`. |
+| `integration` | `*.int-spec.ts` | `npm run test:integration` | `globalSetup` поднимает один Postgres 16 и Redis 7 через `testcontainers`, создаёт 4 базы (`orders`/`payments`/`inventory`/`notifications`), накатывает на каждую её секцию из `scripts/init-db.sql`. Kafka не поднимается — продьюсер/консьюмер мокаются. `--runInBand`, `testTimeout: 60s`. |
 
 `npm test` запускает обе группы. `npm run test:cov` — с покрытием.
 
@@ -252,10 +252,10 @@ apps/{orders,payments,inventory,notifications}/src   — сервисы (control
 apps/*/src/*.spec.ts                                 — unit-тесты рядом с кодом
 apps/*/src/*.int-spec.ts                             — integration-тесты против реальных Pg + Redis
 libs/common/src/{db,redis,kafka,events,otel,logger}  — общие клиенты и контракты
-test/setup/{global-setup,global-teardown}.ts         — testcontainers (Pg + Redis), создаёт 4 БД, накатывает init-db.sql + migrations/orders
+test/setup/{global-setup,global-teardown}.ts         — testcontainers (Pg + Redis), создаёт 4 БД, накатывает init-db.sql
 test/helpers/                                        — mock-factories, createTestPg(service), truncate(...)
 jest.config.ts                                       — два projects: unit и integration
-migrations/orders                                    — node-pg-migrate, миграции схемы orders
+apps/*/prisma/                                       — Prisma-схемы и миграции для каждого сервиса
 scripts/init-db.sql                                  — схема всех 4 БД + сидинг каталога
 Dockerfile                                           — мульти-стейдж, параметризуется SERVICE arg
 docker-compose.yml                                   — инфра + 4 сервиса

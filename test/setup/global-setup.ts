@@ -1,7 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Client } from 'pg';
-import { runner as pgMigrate } from 'node-pg-migrate';
 import {
   PostgreSqlContainer,
   StartedPostgreSqlContainer,
@@ -67,15 +66,6 @@ export default async function globalSetup(): Promise<void> {
       await client.end();
     }
   }
-
-  // Run orders migrations on top of the seeded schema.
-  await pgMigrate({
-    databaseUrl: dsnFor(bootstrapUri, 'orders'),
-    dir: join(REPO_ROOT, 'migrations', 'orders'),
-    direction: 'up',
-    migrationsTable: 'pgmigrations',
-    log: () => {},
-  });
 
   process.env.DATABASE_URL_ORDERS = dsnFor(bootstrapUri, 'orders');
   process.env.DATABASE_URL_PAYMENTS = dsnFor(bootstrapUri, 'payments');

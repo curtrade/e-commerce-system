@@ -1,0 +1,22 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../../node_modules/.prisma/client-notifications"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Notification {
+  id        BigInt   @id @default(autoincrement())
+  orderId   String   @map("order_id")
+  channel   String
+  recipient String
+  subject   String
+  body      String
+  sentAt    DateTime @default(now()) @map("sent_at") @db.Timestamptz()
+
+  @@index([orderId], map: "notifications_order_idx")
+  @@map("notifications")
+}
