@@ -35,7 +35,7 @@ POST /orders
  └─ HTTP  inventory.reserve(ttl=900s)   ── Idempotency-Key: <orderId>:<attemptId>
  └─ HTTP  payments.charge               ── тот же ключ
  └─ tx:   UPDATE order=CONFIRMED + INSERT orders_outbox(OrderConfirmed)
- └─ outbox publisher (SELECT … FOR UPDATE SKIP LOCKED, poll 1s) → Kafka
+ └─ outbox publisher (SELECT … FOR UPDATE SKIP LOCKED, poll 1s, max 10 attempts, exp backoff) → Kafka
          ├─ inventory.consumer  → commit reservation
          └─ notifications.consumer → запись в notifications
 ```
@@ -47,6 +47,18 @@ POST /orders
 3. **Reaper TTL** — `inventory.reaper` каждые 30 с релизит `PENDING` с истёкшим `expires_at`.
 
 Плюс `saga-recovery` в `orders`: раз в 15 с переводит `PENDING` старше `SAGA_TIMEOUT_SEC` (60 с) в `FAILED_TIMEOUT` с событием `OrderFailed`.
+
+## Outbox-ретраи
+
+Outbox publisher (`apps/orders/src/outbox.publisher.ts`) поллит `orders_outbox` раз в секунду и публикует непубликованные строки в Kafka. При недоступности брокера работают три механизма защиты:
+
+| Механизм | Что делает | Где |
+|---|---|---|
+| **Max attempts / dead-letter** | Строки с `attempts >= 10` исключаются из SELECT (`AND attempts < $1`). При достижении лимита пишется `WARN`-лог. Строка остаётся в таблице как dead-letter для ручного разбора. | `outbox.publisher.ts` — SELECT-фильтр + `logger.warn` |
+| **Circuit breaker** | При первом сбое `producer.send` в batch оставшиеся строки пропускаются. Предотвращает N одинаковых ошибок на N строк при лежащем Kafka. | `outbox.publisher.ts` — `break` в цикле после первого `catch` |
+| **Exponential backoff** | После сбоя следующий tick пропускается на `min(1s × 2^n, 60s)`, где n — число последовательных неудач. При успешном batch backoff сбрасывается. | `outbox.publisher.ts` — `nextRetryAt` + `consecutiveFailures` |
+
+Прогрессия backoff: 2с → 4с → 8с → 16с → 32с → 60с (потолок). При даунтайме Kafka в 10 минут вместо 600 ERROR-строк в логе будет ~30.
 
 ## Идемпотентность
 
@@ -70,7 +82,7 @@ auth выключен — UI открывается на `http://localhost:3000`
 - **Через outbox-границу руками**. Авто-пропагация рвётся, потому что между `INSERT outbox` и публикацией в Kafka сидит polling-цикл в другом таймере. В транзакции `orders` сохраняем W3C `traceparent` в `orders_outbox.trace_context` через `captureTraceparent()` (`orders.service.ts:137,182`), а `OutboxPublisher` восстанавливает его как родителя спана `outbox.publish` через `withSpan(..., { parentTraceparent: row.trace_context })` (`outbox.publisher.ts:58-67`).
 - **Хелперы** в `libs/common/src/otel/with-span.ts`: `withSpan(tracerName, spanName, fn, { parentTraceparent? })` и `captureTraceparent()`. Используются ещё в `saga-recovery.service.ts` — фоновая джоба восстановления получает собственный root-спан.
 - **Env**: `OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT` (base, без `/v1/...`), `LOG_LEVEL` (по умолчанию `info`).
-- **Ограничение**: миграция `1779373518241_orders-outbox-trace-context.js` снесла старую колонку `trace_id`; строки в outbox до миграции опубликуются как новые корни трасс.
+- **Ограничение**: миграция `0_init` (Prisma baseline) содержит `trace_context` вместо устаревшей `trace_id`; строки в outbox до миграции опубликуются как новые корни трасс.
 
 ## Запуск
 
@@ -98,7 +110,7 @@ Dev-режим (без контейнеров) — поднять Postgres/Redis
 
 ## Тестирование
 
-Покрыты все четыре сервиса — **109 тестов** (82 unit + 27 integration). Jest разведён на два проекта через `jest.config.ts`:
+Покрыты все четыре сервиса — **140 тестов** (111 unit + 29 integration). Jest разведён на два проекта через `jest.config.ts`:
 
 | Группа | Регистр | Команда | Окружение |
 |---|---|---|---|
@@ -114,7 +126,7 @@ Dev-режим (без контейнеров) — поднять Postgres/Redis
 
 ### Unit (`apps/*/src/*.spec.ts`)
 
-#### `apps/orders` (32 теста, 4 файла)
+#### `apps/orders` (41 тест, 5 файлов)
 
 **`orders.controller.spec.ts` — `OrdersController`** (тонкая обёртка над сервисом):
 - `POST /` пробрасывает DTO в `service.createOrder` и возвращает его результат как есть.
@@ -131,18 +143,25 @@ Dev-режим (без контейнеров) — поднять Postgres/Redis
 
 **`outbox.publisher.spec.ts` — `OutboxPublisher`** (моки pg и kafka, `withSpan` тоже замокан, чтобы заглянуть в `parentTraceparent`):
 - `onModuleInit` регистрирует интервал под именем `orders-outbox-publisher`.
-- `tick` селектит `FROM orders_outbox` с `published_at IS NULL` и `FOR UPDATE SKIP LOCKED`.
+- `tick` селектит `FROM orders_outbox` с `published_at IS NULL`, `attempts < $1` и `FOR UPDATE SKIP LOCKED`.
 - На успешном `producer.send` каждая строка превращается в конверт `{ eventId, eventType, occurredAt, payload }`, в Kafka летит с `key = aggregate_id` и `topic = orders.events`, затем `UPDATE orders_outbox SET published_at = NOW()` ровно по этой строке.
 - Если `producer.send` упал — выполняется `SET attempts = attempts + 1` без `published_at`.
+- Circuit breaker: при сбое первой строки в batch остальные не пробуются — `producer.send` вызывается ровно 1 раз.
+- Exponential backoff: после сбоя следующий tick пропускается, пока `Date.now() < nextRetryAt`; по истечении backoff tick срабатывает.
+- Backoff сбрасывается после полностью успешного batch.
 - `row.trace_context` пробрасывается в `withSpan` как `parentTraceparent` (восстановление родителя спана после outbox-границы).
 - Защита от наложения тиков: пока первый `tick` висит на SELECT, второй вызов выходит сразу через guard `running` — повторного SELECT не происходит.
+
+**`prisma-exception.filter.spec.ts` — `PrismaExceptionFilter`** (6 тестов):
+- P2002 → 409 Conflict, P2025 → 404, P2003 → 400 (related resource), P2014 → 400 (invalid relation), unknown → 500 с логированием.
+- Non-HTTP контекст (`host.getType() === 'rpc'`) — ошибка пробрасывается дальше, `switchToHttp` не вызывается.
 
 **`saga-recovery.service.spec.ts` — `SagaRecoveryService`** (fake timers, мок `OrdersService`):
 - `onModuleInit` регистрирует один интервал под именем `orders-saga-recovery`.
 - На каждый тик (раз в 15 с) дергается `recoverStuckOrders`.
 - Ошибку из `recoverStuckOrders` глотает с `logger.error`, интервал продолжает жить — следующий тик отрабатывает.
 
-#### `apps/payments` (16 тестов, 2 файла)
+#### `apps/payments` (22 теста, 3 файла)
 
 **`payments.controller.spec.ts` — `PaymentsController`**:
 - `POST /charge` без `Idempotency-Key` бросает `BadRequestException`.
@@ -159,7 +178,10 @@ Dev-режим (без контейнеров) — поднять Postgres/Redis
 - `refund` — `NotFoundException` если строки нет; идемпотентен на `REFUNDED` (только SELECT, без UPDATE); на статусе `FAILED` бросает `BadGatewayException('Cannot refund payment in FAILED')`; на `CHARGED` — `UPDATE payments SET status='REFUNDED'`.
 - `getByOrder` — первая строка или `null`.
 
-#### `apps/inventory` (28 тестов, 4 файла)
+**`prisma-exception.filter.spec.ts` — `PrismaExceptionFilter`** (6 тестов):
+- P2002 → 409, P2025 → 404, P2003 → 400, P2014 → 400, unknown → 500, non-HTTP context → rethrow.
+
+#### `apps/inventory` (34 теста, 5 файлов)
 
 **`inventory.controller.spec.ts` — `InventoryController`**:
 - `POST /reserve` без `Idempotency-Key` бросает `BadRequestException`.
@@ -184,7 +206,10 @@ Dev-режим (без контейнеров) — поднять Postgres/Redis
 - `OrderFailed` с `reservationId` → `inventory.release({ reservationId })` (компенсация Layer 3).
 - `OrderFailed` без `reservationId` → no-op (inventory тут уже не при делах).
 
-#### `apps/notifications` (6 тестов, 2 файла)
+**`prisma-exception.filter.spec.ts` — `PrismaExceptionFilter`** (6 тестов):
+- P2002 → 409, P2025 → 404, P2003 → 400, P2014 → 400, unknown → 500, non-HTTP context → rethrow.
+
+#### `apps/notifications` (12 тестов, 3 файла)
 
 **`notifications.service.spec.ts` — `NotificationsService`**:
 - `sendOrderConfirmedEmail` — `INSERT INTO notifications` с `channel='email'`, `subject='Order confirmed'`, и точным body `Your order <id> for $<total> is confirmed.`.
@@ -196,6 +221,9 @@ Dev-режим (без контейнеров) — поднять Postgres/Redis
 - `OrderConfirmed` → `sendOrderConfirmedEmail({ orderId, email, total })`.
 - `OrderFailed` → `sendOrderFailedEmail({ orderId, email, reason })`.
 - Неизвестный `eventType` — no-op.
+
+**`prisma-exception.filter.spec.ts` — `PrismaExceptionFilter`** (6 тестов):
+- P2002 → 409, P2025 → 404, P2003 → 400, P2014 → 400, unknown → 500, non-HTTP context → rethrow.
 
 ### Integration (`apps/*/src/*.int-spec.ts`)
 
@@ -212,6 +240,8 @@ Dev-режим (без контейнеров) — поднять Postgres/Redis
 
 - одиночный издатель публикует все непубликованные строки ровно по разу, `eventId` совпадают со вставленными id; `published_at IS NULL` исчезает.
 - при провале `producer.send` строка остаётся неопубликованной, `attempts` инкрементнулся до 1.
+- строки с `attempts >= 10` (max attempts) не выбираются поллером — остаются в таблице как dead-letter.
+- circuit breaker: при провале первого `producer.send` в batch остальные строки не пробуются, `attempts` увеличен только у первой.
 - задокументированная гонка двух publishers: SELECT через `pool.query` авто-коммитится и снимает `FOR UPDATE SKIP LOCKED` раньше, чем стартует `UPDATE`, поэтому два параллельных publisher'а через детерминированные барьеры (без `setTimeout`) видят одни и те же строки и дважды отправляют их в Kafka (`send.mock.calls.length > N`). Все строки в итоге помечены `published_at` — eventually-correct. Тест пиннит текущее поведение; если SELECT+UPDATE завернут в одну транзакцию, тест станет `toBe(N)`.
 
 #### `apps/orders/src/saga-recovery.int-spec.ts`

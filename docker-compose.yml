@@ -137,10 +137,10 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/orders
     command:
-      ["npx", "prisma", "migrate", "deploy", "--schema=_prisma/schema.prisma"]
+      ["sh", "-c", "for i in 1 2 3; do npx prisma migrate deploy --schema=_prisma/schema.prisma && exit 0; echo \"migrate attempt $i failed, retrying in 3s...\"; sleep 3; done; exit 1"]
     depends_on:
       postgres: { condition: service_healthy }
-    restart: on-failure
+    restart: "no"
 
   orders:
     build:
@@ -179,10 +179,10 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/payments
     command:
-      ["npx", "prisma", "migrate", "deploy", "--schema=_prisma/schema.prisma"]
+      ["sh", "-c", "for i in 1 2 3; do npx prisma migrate deploy --schema=_prisma/schema.prisma && exit 0; echo \"migrate attempt $i failed, retrying in 3s...\"; sleep 3; done; exit 1"]
     depends_on:
       postgres: { condition: service_healthy }
-    restart: on-failure
+    restart: "no"
 
   payments:
     build:
@@ -216,10 +216,10 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/inventory
     command:
-      ["npx", "prisma", "migrate", "deploy", "--schema=_prisma/schema.prisma"]
+      ["sh", "-c", "for i in 1 2 3; do npx prisma migrate deploy --schema=_prisma/schema.prisma && exit 0; echo \"migrate attempt $i failed, retrying in 3s...\"; sleep 3; done; exit 1"]
     depends_on:
       postgres: { condition: service_healthy }
-    restart: on-failure
+    restart: "no"
 
   inventory:
     build:
@@ -254,10 +254,10 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/notifications
     command:
-      ["npx", "prisma", "migrate", "deploy", "--schema=_prisma/schema.prisma"]
+      ["sh", "-c", "for i in 1 2 3; do npx prisma migrate deploy --schema=_prisma/schema.prisma && exit 0; echo \"migrate attempt $i failed, retrying in 3s...\"; sleep 3; done; exit 1"]
     depends_on:
       postgres: { condition: service_healthy }
-    restart: on-failure
+    restart: "no"
 
   notifications:
     build:
