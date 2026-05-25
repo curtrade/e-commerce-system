@@ -68,7 +68,7 @@ describe('OutboxPublisher (integration)', () => {
     const sentIds = producer.send.mock.calls.map((c) => c[2] as { eventId: string });
     expect(sentIds.map((e) => e.eventId).sort()).toEqual([...ids].sort());
 
-    const { rows } = await pg.query<{ unpublished: string }>(
+    const { rows } = await pg.query<{ unpublished: number }>(
       `SELECT COUNT(*)::int AS unpublished
          FROM orders_outbox WHERE published_at IS NULL`,
     );
@@ -100,7 +100,7 @@ describe('OutboxPublisher (integration)', () => {
 
     expect(producer.send).not.toHaveBeenCalled();
 
-    const { rows } = await pg.query<{ unpublished: string }>(
+    const { rows } = await pg.query<{ unpublished: number }>(
       `SELECT COUNT(*)::int AS unpublished
          FROM orders_outbox WHERE published_at IS NULL`,
     );
@@ -166,7 +166,7 @@ describe('OutboxPublisher (integration)', () => {
 
     expect(producer.send.mock.calls.length).toBeGreaterThan(N);
 
-    const { rows } = await pg.query<{ unpublished: string }>(
+    const { rows } = await pg.query<{ unpublished: number }>(
       `SELECT COUNT(*)::int AS unpublished
          FROM orders_outbox WHERE published_at IS NULL`,
     );

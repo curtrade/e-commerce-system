@@ -54,8 +54,9 @@ const tick = (p: OutboxPublisher): Tick => (p as unknown as { tick: Tick }).tick
 describe('OutboxPublisher', () => {
   beforeEach(() => {
     withSpanMock.mockClear();
-    jest.spyOn(Date, 'now').mockRestore();
   });
+
+  afterEach(() => jest.restoreAllMocks());
 
   describe('onModuleInit', () => {
     it('registers a polling interval under the expected name', () => {
@@ -189,7 +190,7 @@ describe('OutboxPublisher', () => {
       jest.spyOn(Date, 'now').mockReturnValue(now + 10_001);
       s.pg.query.mockResolvedValueOnce(pgResult());
       await tick(s.publisher).call(s.publisher);
-      // SELECT was called: 1 (fail) + 1 (success) + 1 (immediate) + attempts UPDATE = 5 total
+      // 1 SELECT(fail) + 1 attempts UPDATE + 1 SELECT(success) + 1 published_at UPDATE + 1 SELECT(empty) = 5
       expect(s.pg.query).toHaveBeenCalledTimes(5);
     });
 
@@ -203,6 +204,50 @@ describe('OutboxPublisher', () => {
       expect(withSpanMock).toHaveBeenCalledTimes(1);
       const opts = withSpanMock.mock.calls[0][3];
       expect(opts).toEqual({ parentTraceparent: tp });
+    });
+
+    it('SELECT failure applies backoff (does not hammer dead DB)', async () => {
+      const s = setup();
+      s.pg.query.mockRejectedValueOnce(new Error('connection refused'));
+
+      const now = 1_000_000;
+      jest.spyOn(Date, 'now').mockReturnValue(now);
+
+      await tick(s.publisher).call(s.publisher);
+
+      // Next tick within backoff — skipped
+      jest.spyOn(Date, 'now').mockReturnValue(now + 500);
+      await tick(s.publisher).call(s.publisher);
+      expect(s.pg.query).toHaveBeenCalledTimes(1);
+    });
+
+    it('resets backoff after empty poll (no stale consecutiveFailures)', async () => {
+      const s = setup();
+
+      // Fail first
+      s.pg.query.mockResolvedValueOnce(pgResult([makeRow()]));
+      s.producer.send.mockRejectedValueOnce(new Error('broker down'));
+      const now = 1_000_000;
+      jest.spyOn(Date, 'now').mockReturnValue(now);
+      await tick(s.publisher).call(s.publisher);
+
+      // Empty poll after backoff expires — should reset backoff
+      jest.spyOn(Date, 'now').mockReturnValue(now + 10_000);
+      s.pg.query.mockResolvedValueOnce(pgResult([]));
+      await tick(s.publisher).call(s.publisher);
+
+      // Another failure should start from low backoff (2s), not compound
+      jest.spyOn(Date, 'now').mockReturnValue(now + 10_001);
+      s.pg.query.mockResolvedValueOnce(pgResult([makeRow({ id: 'r-2' })]));
+      s.producer.send.mockRejectedValueOnce(new Error('broker down'));
+      await tick(s.publisher).call(s.publisher);
+
+      // Backoff should be 2s (consecutiveFailures=1), not 16s+ (stale count)
+      jest.spyOn(Date, 'now').mockReturnValue(now + 10_001 + 2500);
+      s.pg.query.mockResolvedValueOnce(pgResult([]));
+      await tick(s.publisher).call(s.publisher);
+      // If backoff was stale (16s), this tick would be skipped; at 2s it proceeds
+      expect(s.pg.query).toHaveBeenCalledTimes(6); // SELECT(fail)+attempts + SELECT(empty) + SELECT(fail2)+attempts + SELECT(ok)
     });
 
     it('skips overlapping ticks via the running guard', async () => {

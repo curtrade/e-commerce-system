@@ -54,11 +54,12 @@ CREATE TABLE payments (
     order_id        text        NOT NULL,
     amount          numeric(12, 2) NOT NULL,
     status          text        NOT NULL,
-    idempotency_key text        NOT NULL UNIQUE,
+    idempotency_key text        NOT NULL,
     created_at      timestamptz NOT NULL DEFAULT NOW(),
     updated_at      timestamptz NOT NULL DEFAULT NOW()
 );
 
+CREATE UNIQUE INDEX payments_idempotency_key_key ON payments (idempotency_key);
 CREATE INDEX payments_order_idx ON payments (order_id);
 
 -- ============================================================

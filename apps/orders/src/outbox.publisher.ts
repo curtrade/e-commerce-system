@@ -80,27 +80,32 @@ export class OutboxPublisher implements OnModuleInit {
               `Outbox row ${row.id} exhausted ${MAX_ATTEMPTS} attempts, will not be retried`,
             );
           }
-          this.consecutiveFailures++;
-          const delayMs = Math.min(
-            BACKOFF_BASE_MS * 2 ** this.consecutiveFailures,
-            BACKOFF_MAX_MS,
-          );
-          this.nextRetryAt = Date.now() + delayMs;
-          this.logger.warn(`Outbox backing off for ${delayMs}ms`);
+          this.applyBackoff();
           failed = true;
           break;
         }
       }
 
-      if (!failed && rows.length > 0) {
+      if (!failed) {
         this.consecutiveFailures = 0;
         this.nextRetryAt = 0;
       }
     } catch (err) {
       this.logger.error(`Outbox tick failed: ${(err as Error).message}`);
+      this.applyBackoff();
     } finally {
       this.running = false;
     }
+  }
+
+  private applyBackoff(): void {
+    this.consecutiveFailures++;
+    const delayMs = Math.min(
+      BACKOFF_BASE_MS * 2 ** this.consecutiveFailures,
+      BACKOFF_MAX_MS,
+    );
+    this.nextRetryAt = Date.now() + delayMs;
+    this.logger.warn(`Outbox backing off for ${delayMs}ms`);
   }
 
   private async publishRow(row: OutboxRow): Promise<void> {
@@ -110,18 +115,32 @@ export class OutboxPublisher implements OnModuleInit {
       occurredAt: new Date().toISOString(),
       payload: row.payload,
     };
+
     try {
       await this.producer.send(row.topic, row.aggregate_id, envelope);
+    } catch (sendErr) {
+      try {
+        await this.pg.query(
+          `UPDATE orders_outbox SET attempts = attempts + 1 WHERE id = $1`,
+          [row.id],
+        );
+      } catch (dbErr) {
+        this.logger.error(
+          `Failed to bump attempts for row ${row.id}: ${(dbErr as Error).message}`,
+        );
+      }
+      throw sendErr;
+    }
+
+    try {
       await this.pg.query(
         `UPDATE orders_outbox SET published_at = NOW() WHERE id = $1`,
         [row.id],
       );
-    } catch (err) {
-      await this.pg.query(
-        `UPDATE orders_outbox SET attempts = attempts + 1 WHERE id = $1`,
-        [row.id],
+    } catch (dbErr) {
+      this.logger.error(
+        `Row ${row.id} sent to Kafka but published_at UPDATE failed: ${(dbErr as Error).message}`,
       );
-      throw err;
     }
   }
 }
