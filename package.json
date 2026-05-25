@@ -68,7 +68,6 @@
     "@prisma/client": "^6.1.0",
     "kafkajs": "^2.2.4",
     "nestjs-pino": "^4.6.1",
-    "node-pg-migrate": "^8.0.4",
     "pg": "^8.13.1",
     "prisma": "^6.1.0",
     "pino": "^10.3.1",
