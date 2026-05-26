@@ -182,14 +182,15 @@ Dev-режим (без контейнеров) — поднять Postgres/Redis
 
 ## Тестирование
 
-Покрыты все четыре сервиса — **140 тестов** (111 unit + 29 integration). Jest разведён на два проекта через `jest.config.ts`:
+Покрыты все четыре сервиса — **140+ тестов** (unit + integration + e2e). Jest разведён на три проекта через `jest.config.ts`:
 
 | Группа | Регистр | Команда | Окружение |
 |---|---|---|---|
 | `unit` | `*.spec.ts` | `npm run test:unit` | Только моки. Фабрики в `test/helpers/mock-factories.ts`: `createMockPg` (включая `txClientQuery` для проверки `withTransaction`), `createMockRedis` (с `raw().get/set` и `claimIdempotency`), `createMockKafkaProducer`, `pgResult()` для типобезопасных `QueryResult`. |
 | `integration` | `*.int-spec.ts` | `npm run test:integration` | `globalSetup` поднимает один Postgres 16 и Redis 7 через `testcontainers`, создаёт 4 базы (`orders`/`payments`/`inventory`/`notifications`), накатывает на каждую её секцию из `scripts/init-db.sql`. Kafka не поднимается — продьюсер/консьюмер мокаются. `--runInBand`, `testTimeout: 60s`. |
+| `e2e` | `*.e2e-spec.ts` | `npm run test:e2e` | `globalSetup` запускает `docker compose up -d --build` и поллит `/health` всех 4 сервисов. Полный прогон системы: HTTP-запросы → saga → Kafka → consumers. Прямые проверки в БД каждого сервиса через `pg.Client`. `--runInBand`, `testTimeout: 120s`. |
 
-`npm test` запускает обе группы. `npm run test:cov` — с покрытием.
+`npm test` запускает unit + integration. `npm run test:e2e` — отдельно (требует docker compose). `npm run test:cov` — с покрытием.
 
 **Тестовые хелперы** (`test/helpers/`):
 - `createTestPg(service)` — реальный `PgService`, привязанный к базе сервиса через `DATABASE_URL_<SERVICE>`; дефолт — `orders`.
@@ -347,6 +348,19 @@ Dev-режим (без контейнеров) — поднять Postgres/Redis
 - `sendOrderFailedEmail` с email создаёт ряд с `subject='Order failed'`, body содержит причину.
 - `sendOrderFailedEmail` без email — ноль рядов в таблице.
 
+### E2E (`test/e2e/*.e2e-spec.ts`)
+
+Полный прогон всей системы через `docker compose`. `globalSetup` билдит и поднимает все сервисы, поллит `/health` до готовности. Тесты шлют HTTP-запросы и проверяют результат в БД каждого сервиса через прямые `pg.Client`-подключения.
+
+#### `test/e2e/orders.e2e-spec.ts`
+
+- **Happy path**: `POST /orders` → `CONFIRMED` с `orderId`, `reservationId`, `paymentId`, `total`. `GET /orders/:id` возвращает `CONFIRMED`. Outbox публикует `OrderConfirmed` в Kafka → inventory consumer коммитит резервацию (проверка: `reservations.status = 'COMMITTED'` в БД inventory). Notifications consumer создаёт email-запись (`notifications.subject = 'Order confirmed'`, `recipient = 'e2e@test.com'`).
+- **Insufficient stock**: `qty=999999` → `FAILED_INVENTORY`, `paymentId` отсутствует, в БД статус `FAILED_INVENTORY`.
+- **Несуществующий заказ**: `GET /orders/00000000-...` → 404.
+- **Validation**: пустое тело → 400; `items=[]` → 400; невалидный email → 400.
+
+Хелперы (`test/e2e/helpers.ts`): `createOrder(body)`, `pgQuery(db, sql, params)`, `waitFor(fn, timeout)` — retry-loop для ожидания Kafka-пропагации.
+
 ## Структура
 
 ```
@@ -355,8 +369,9 @@ apps/*/src/*.spec.ts                                 — unit-тесты ряд�
 apps/*/src/*.int-spec.ts                             — integration-тесты против реальных Pg + Redis
 libs/common/src/{db,redis,kafka,events,otel,logger}  — общие клиенты и контракты
 test/setup/{global-setup,global-teardown}.ts         — testcontainers (Pg + Redis), создаёт 4 БД, накатывает init-db.sql
+test/e2e/                                            — E2E: docker compose + Jest, saga happy/fail/validation
 test/helpers/                                        — mock-factories, createTestPg(service), truncate(...)
-jest.config.ts                                       — два projects: unit и integration
+jest.config.ts                                       — три projects: unit, integration, e2e
 apps/*/prisma/                                       — Prisma-схемы и миграции для каждого сервиса
 scripts/init-db.sql                                  — схема всех 4 БД + сидинг каталога
 scripts/docker-entrypoint.sh                         — читает Docker secrets → env vars
