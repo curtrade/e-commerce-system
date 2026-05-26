@@ -4,6 +4,7 @@ datasources:
     type: loki
     access: proxy
     url: http://loki:3100
+    uid: loki
     isDefault: true
     jsonData:
       # Связка лог → трейс: клик по trace_id в Loki открывает спан в Jaeger.
@@ -21,3 +22,4 @@ datasources:
     type: prometheus
     access: proxy
     url: http://prometheus:9090
+    uid: prometheus

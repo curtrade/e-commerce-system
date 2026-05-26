@@ -137,6 +137,7 @@ services:
       GF_AUTH_DISABLE_LOGIN_FORM: "true"
     volumes:
       - ./scripts/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+      - ./scripts/grafana-alerting.yaml:/etc/grafana/provisioning/alerting/alerting.yaml:ro
       - grafanadata:/var/lib/grafana
     ports:
       - "127.0.0.1:3000:3000"

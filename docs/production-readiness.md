@@ -15,7 +15,7 @@
 
 - [x] Swagger/OpenAPI — /docs на orders(:3001), payments(:3002), inventory(:3003)
 - [x] E2E-тесты (docker compose + Jest: saga happy path, FAILED_INVENTORY, validation, Kafka propagation)
-- [ ] **Алерты в Grafana** — дашборды есть, но нет threshold-алертов (latency, error rate, outbox backlog)
+- [x] Алерты Grafana (provisioned: HTTP 5xx rate, P95 latency, error log spike, outbox dead-letter)
 - [ ] **Бэкапы БД** — нет скриптов backup/restore и cron-расписания
 - [ ] **Реальный email-провайдер** — NotificationsService пишет в БД, но не отправляет (SendGrid / AWS SES)
 - [ ] **Реальный платёжный шлюз** — PaymentsService — мок с FAILURE_RATE. Нужен Stripe / YooKassa
