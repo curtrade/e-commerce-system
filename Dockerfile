@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.7
 # Single multi-stage Dockerfile for all four Nest apps in this monorepo.
 # Pass --build-arg SERVICE=orders|payments|inventory|notifications.
 
