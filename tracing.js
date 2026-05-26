@@ -10,7 +10,13 @@ const {
 const {
   OTLPLogExporter,
 } = require('@opentelemetry/exporter-logs-otlp-http');
+const {
+  OTLPMetricExporter,
+} = require('@opentelemetry/exporter-metrics-otlp-http');
 const { BatchLogRecordProcessor } = require('@opentelemetry/sdk-logs');
+const {
+  PeriodicExportingMetricReader,
+} = require('@opentelemetry/sdk-metrics');
 const { resourceFromAttributes } = require('@opentelemetry/resources');
 const { ATTR_SERVICE_NAME } = require('@opentelemetry/semantic-conventions');
 
@@ -26,6 +32,10 @@ const sdk = new NodeSDK({
     [ATTR_SERVICE_NAME]: serviceName,
   }),
   traceExporter: new OTLPTraceExporter(),
+  metricReader: new PeriodicExportingMetricReader({
+    exporter: new OTLPMetricExporter(),
+    exportIntervalMillis: 15_000,
+  }),
   logRecordProcessors: [
     new BatchLogRecordProcessor(new OTLPLogExporter()),
   ],

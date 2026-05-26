@@ -9,7 +9,7 @@
 - [x] Rate limiting (@nestjs/throttler: 60 req/min на IP, @SkipThrottle на /health)
 - [x] ESLint — 0 ошибок (86 исправлено)
 - [x] Секреты (Docker Swarm Secrets: entrypoint инъекция, .env.secrets на сервере, create-swarm-secrets.sh)
-- [ ] **Prometheus-метрики** — трейсинг и логи есть (Jaeger + Loki), но метрик нет. Без них нельзя настроить алерты на деградацию
+- [x] Prometheus-метрики (OTEL SDK → OTEL Collector → Prometheus → Grafana)
 
 ## Важно (до первых пользователей)
 
