@@ -1,5 +1,7 @@
 import { ConfigifyModule } from '@itgorillaz/configify';
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AppLoggerModule, PgModule, RedisModule } from '@app/common';
 import { AppConfiguration } from './app.configuration';
 import { HealthController } from './health.controller';
@@ -10,6 +12,7 @@ import { PaymentsService } from './payments.service';
   imports: [
     AppLoggerModule,
     ConfigifyModule.forRootAsync(),
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 60 }]),
     PgModule.forRootAsync({
       inject: [AppConfiguration],
       useFactory: (cfg: AppConfiguration) => ({
@@ -23,6 +26,7 @@ import { PaymentsService } from './payments.service';
   ],
   controllers: [HealthController, PaymentsController],
   providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
     PaymentsService,
   ],
 })
