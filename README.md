@@ -14,7 +14,7 @@ NestJS-монорепо из четырёх сервисов на одной Pos
 | `notifications` | 3004 | Kafka-консьюмер, пишет уведомления в БД (email-провайдер не подключён) |
 
 Общая инфра: `postgres:5432`, `redis:6379`, `kafka:9092`, `kafka-ui:8080`.
-Observability: `otel-collector:4318` (OTLP HTTP), `jaeger:16686` (трейсы), `loki:3100` (логи), `grafana:3000` (UI).
+Observability: `otel-collector:4318` (OTLP HTTP), `jaeger:16686` (трейсы), `loki:3100` (логи), `prometheus:9090` (метрики), `grafana:3000` (UI).
 В одном инстансе Postgres создаются 4 базы (`init-db.sql`), Redis разделён по DB 0–3.
 
 ## Шина
@@ -68,21 +68,79 @@ Outbox publisher (`apps/orders/src/outbox.publisher.ts`) поллит `orders_ou
 - `inventory` кэширует результат reserve в Redis (`inv:idem:*`, TTL 24 ч).
 - Kafka-консьюмеры дедуплицируют по `eventId` через `redis.claimIdempotency` (TTL 7 дней).
 
-## Observability (traces + logs)
+## Observability (traces + logs + metrics)
 
 Сервисы шлют OTLP HTTP в **otel-collector**, который разводит сигналы: трейсы → Jaeger,
-логи → Loki. Grafana подцеплена к Loki и Jaeger через provisioning (`scripts/grafana-datasources.yaml`),
+логи → Loki, метрики → Prometheus. Grafana подцеплена к Loki, Jaeger и Prometheus через provisioning (`scripts/grafana-datasources.yaml`),
 auth выключен — UI открывается на `http://localhost:3000`.
 
-- **Инициализация**: `tracing.js` подгружается через `NODE_OPTIONS=--require=/app/tracing.js`. Внутри `NodeSDK` поднимает `traceExporter: OTLPTraceExporter()` и `logRecordProcessors: [BatchLogRecordProcessor(OTLPLogExporter())]` без явного `url` — экспортёры берут эндпоинт из `OTEL_EXPORTER_OTLP_ENDPOINT` и сами подставляют `/v1/traces` и `/v1/logs`.
+- **Инициализация**: `tracing.js` подгружается через `NODE_OPTIONS=--require=/app/tracing.js`. Внутри `NodeSDK` поднимает `traceExporter: OTLPTraceExporter()`, `metricReader: PeriodicExportingMetricReader(OTLPMetricExporter(), 15s)` и `logRecordProcessors: [BatchLogRecordProcessor(OTLPLogExporter())]` без явного `url` — экспортёры берут эндпоинт из `OTEL_EXPORTER_OTLP_ENDPOINT` и сами подставляют `/v1/traces`, `/v1/metrics` и `/v1/logs`.
 - **Auto-instrumentation**: HTTP, `pg`, `ioredis`, `kafkajs`, `pino`. `fs`/`net`/`dns` отключены как шум.
 - **Логгер**: `nestjs-pino` подключён через `AppLoggerModule` из `libs/common/src/logger` во все 4 модуля; в `main.ts` — `app.useLogger(app.get(Logger))` с `bufferLogs: true`. JSON-выход, `/health` отфильтрован, `x-request-id` берётся из заголовка или генерится новым UUID.
 - **Корреляция**: `@opentelemetry/instrumentation-pino` врезает `trace_id`/`span_id`/`trace_flags` в каждую запись лога, выполненную внутри активного спана. В Grafana derivedField на Loki ловит `trace_id` и открывает спан в Jaeger одним кликом (`scripts/grafana-datasources.yaml`).
 - **Sending**: та же инструментация добавляет destination в pino — записи логов улетают в Logs SDK → BatchLogRecordProcessor → OTLPLogExporter → Collector → Loki (`/otlp/v1/logs`, требует `allow_structured_metadata: true` в `loki-config.yaml`).
 - **Через outbox-границу руками**. Авто-пропагация рвётся, потому что между `INSERT outbox` и публикацией в Kafka сидит polling-цикл в другом таймере. В транзакции `orders` сохраняем W3C `traceparent` в `orders_outbox.trace_context` через `captureTraceparent()` (`orders.service.ts:137,182`), а `OutboxPublisher` восстанавливает его как родителя спана `outbox.publish` через `withSpan(..., { parentTraceparent: row.trace_context })` (`outbox.publisher.ts:58-67`).
 - **Хелперы** в `libs/common/src/otel/with-span.ts`: `withSpan(tracerName, spanName, fn, { parentTraceparent? })` и `captureTraceparent()`. Используются ещё в `saga-recovery.service.ts` — фоновая джоба восстановления получает собственный root-спан.
+- **Метрики**: OTEL auto-instrumentation экспортирует `http.server.duration`, `http.client.duration`, Node.js runtime (event loop lag, GC, active handles). Метрики идут через OTLP HTTP → Collector → Prometheus exporter (`:9464`) → Prometheus scrape (`:9090`) → Grafana.
 - **Env**: `OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT` (base, без `/v1/...`), `LOG_LEVEL` (по умолчанию `info`).
 - **Ограничение**: миграция `0_init` (Prisma baseline) содержит `trace_context` вместо устаревшей `trace_id`; строки в outbox до миграции опубликуются как новые корни трасс.
+
+## Security
+
+- **Helmet** — все 4 сервиса: `X-Content-Type-Options`, `X-Frame-Options`, `Strict-Transport-Security` и другие заголовки.
+- **CORS** — `app.enableCors()` во всех `main.ts`.
+- **Rate limiting** — `@nestjs/throttler`: 60 запросов в минуту на IP для `orders`, `payments`, `inventory`. Health-эндпоинты исключены (`@SkipThrottle()`).
+- **Validation** — `ValidationPipe({ whitelist: true, transform: true })` отсекает лишние поля и трансформирует типы.
+
+## CI/CD
+
+GitHub Actions, два workflow:
+
+| Файл | Триггер | Что делает |
+|---|---|---|
+| `.github/workflows/ci.yml` | PR → `master` | ESLint + unit тесты + integration тесты (параллельно) |
+| `.github/workflows/cd.yml` | push `master` / manual | Detect changes → build matrix (per service) → ghcr.io → migrate → deploy staging → approval → deploy prod |
+
+- **Build matrix** — `dorny/paths-filter` определяет изменённые сервисы; `libs/common/**` триггерит все. Образы тегируются `sha-<commit>` + `latest`.
+- **Docker images** — runtime + migrate (два target из одного Dockerfile), кэш через GitHub Actions cache.
+- **Deploy** — SSH на Swarm manager → `docker stack deploy --with-registry-auth`. Staging и Production как GitHub Environments с `required_reviewers`.
+- **Manual trigger** — `workflow_dispatch` с `deploy_all=true` билдит все 4 сервиса.
+
+## Production Deploy (Docker Swarm)
+
+`docker-stack.yml` — Swarm-стек с 4 app-сервисами (инфра внешняя). Секреты через Docker Swarm Secrets.
+
+```bash
+# 1. Создать файл секретов на сервере
+cat > /opt/ecommerce/.env.secrets << 'EOF'
+DATABASE_URL_ORDERS=postgres://user:pass@host:5432/orders
+DATABASE_URL_PAYMENTS=postgres://user:pass@host:5432/payments
+DATABASE_URL_INVENTORY=postgres://user:pass@host:5432/inventory
+DATABASE_URL_NOTIFICATIONS=postgres://user:pass@host:5432/notifications
+REDIS_URL_ORDERS=redis://:pass@host:6379/0
+REDIS_URL_PAYMENTS=redis://:pass@host:6379/2
+REDIS_URL_INVENTORY=redis://:pass@host:6379/1
+REDIS_URL_NOTIFICATIONS=redis://:pass@host:6379/3
+KAFKA_BROKERS=kafka-host:9092
+EOF
+chmod 600 /opt/ecommerce/.env.secrets
+
+# 2. Создать Docker secrets
+./scripts/create-swarm-secrets.sh /opt/ecommerce/.env.secrets
+
+# 3. Создать .env с non-sensitive config
+cat > /opt/ecommerce/.env << 'EOF'
+IMAGE_PREFIX=ghcr.io/<owner>/ecommerce
+IMAGE_TAG=latest
+OTEL_ENDPOINT=http://otel-collector:4318
+LOG_LEVEL=info
+EOF
+
+# 4. Deploy
+docker stack deploy -c docker-stack.yml --with-registry-auth ecommerce
+```
+
+Entrypoint (`scripts/docker-entrypoint.sh`) читает файлы из `/run/secrets/*` и экспортирует как env vars.
 
 ## Запуск
 
@@ -90,7 +148,7 @@ auth выключен — UI открывается на `http://localhost:3000`
 docker compose up -d --build
 # health
 curl :3001/health :3002/health :3003/health :3004/health
-# трассы и логи: Jaeger :16686, Grafana → Explore → Loki / Jaeger на :3000
+# UI: Jaeger :16686, Prometheus :9090, Grafana :3000 (Loki + Jaeger + Prometheus)
 # happy-path (каталог уже заполнен SKU-RED-SHIRT-M / SKU-BLUE-MUG / SKU-NOTEBOOK-A5)
 curl -X POST :3001/orders -H 'content-type: application/json' -d '{
   "customerId":"c1","email":"a@b.c",
@@ -287,6 +345,13 @@ test/helpers/                                        — mock-factories, createT
 jest.config.ts                                       — два projects: unit и integration
 apps/*/prisma/                                       — Prisma-схемы и миграции для каждого сервиса
 scripts/init-db.sql                                  — схема всех 4 БД + сидинг каталога
+scripts/docker-entrypoint.sh                         — читает Docker secrets → env vars
+scripts/create-swarm-secrets.sh                      — создаёт Swarm secrets из .env.secrets
+scripts/prometheus.yml                               — конфиг Prometheus (scrape otel-collector)
 Dockerfile                                           — мульти-стейдж, параметризуется SERVICE arg
-docker-compose.yml                                   — инфра + 4 сервиса
+docker-compose.yml                                   — инфра + 4 сервиса (dev)
+docker-stack.yml                                     — Swarm-стек для staging/production
+.github/workflows/{ci,cd}.yml                        — CI (lint + test) и CD (build + deploy)
+.env.example                                         — шаблон переменных окружения
+docs/production-readiness.md                         — чеклист продакшн-готовности
 ```
