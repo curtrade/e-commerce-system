@@ -61,7 +61,9 @@ COPY --from=build --chown=app:app /app/dist ./dist
 COPY --from=build --chown=app:app /app/_prisma ./_prisma
 COPY --from=build --chown=app:app /app/tracing.js ./
 COPY --from=build --chown=app:app /app/package.json ./
+COPY --chown=app:app scripts/docker-entrypoint.sh ./
+RUN chmod +x docker-entrypoint.sh
 USER app
 EXPOSE 3000
-# Nest monorepo emits to dist/apps/<svc>/apps/<svc>/src/main.js (paths preserved from baseUrl).
+ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["sh", "-c", "node dist/apps/${SERVICE_NAME}/apps/${SERVICE_NAME}/src/main.js"]

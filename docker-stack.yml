@@ -1,22 +1,29 @@
 # Docker Swarm stack — application services only.
 # Infrastructure (Postgres, Redis, Kafka, OTEL collector) is external.
 #
-# Required env vars on the Swarm manager (source from /opt/ecommerce/.env):
-#   IMAGE_PREFIX, IMAGE_TAG,
-#   DATABASE_URL_ORDERS, DATABASE_URL_PAYMENTS,
-#   DATABASE_URL_INVENTORY, DATABASE_URL_NOTIFICATIONS,
-#   KAFKA_BROKERS, REDIS_URL_ORDERS, REDIS_URL_PAYMENTS,
-#   REDIS_URL_INVENTORY, REDIS_URL_NOTIFICATIONS,
-#   OTEL_ENDPOINT, LOG_LEVEL (optional), SENDER_EMAIL (optional)
+# Sensitive values are injected via Docker Swarm Secrets (see secrets: below).
+# The entrypoint reads /run/secrets/<name> and exports as env vars.
+#
+# Non-sensitive config is passed via env vars.
+# On the server: /opt/ecommerce/.env (IMAGE_PREFIX, IMAGE_TAG, OTEL_ENDPOINT, etc.)
+#
+# Initial setup:
+#   1. Create /opt/ecommerce/.env.secrets with DATABASE_URL_*, REDIS_URL_*, KAFKA_BROKERS
+#   2. Run: scripts/create-swarm-secrets.sh /opt/ecommerce/.env.secrets
+#   3. Deploy: docker stack deploy -c docker-stack.yml --with-registry-auth ecommerce
 
 services:
   orders:
     image: ${IMAGE_PREFIX}-orders:${IMAGE_TAG:-latest}
+    secrets:
+      - source: database_url_orders
+        target: database_url
+      - source: redis_url_orders
+        target: redis_url
+      - source: kafka_brokers
+        target: kafka_brokers
     environment:
       PORT: "3000"
-      DATABASE_URL: ${DATABASE_URL_ORDERS}
-      KAFKA_BROKERS: ${KAFKA_BROKERS}
-      REDIS_URL: ${REDIS_URL_ORDERS}
       INVENTORY_URL: http://inventory:3000
       PAYMENTS_URL: http://payments:3000
       RESERVATION_TTL_SEC: ${RESERVATION_TTL_SEC:-900}
@@ -61,10 +68,13 @@ services:
 
   payments:
     image: ${IMAGE_PREFIX}-payments:${IMAGE_TAG:-latest}
+    secrets:
+      - source: database_url_payments
+        target: database_url
+      - source: redis_url_payments
+        target: redis_url
     environment:
       PORT: "3000"
-      DATABASE_URL: ${DATABASE_URL_PAYMENTS}
-      REDIS_URL: ${REDIS_URL_PAYMENTS}
       FAILURE_RATE: "0"
       OTEL_SERVICE_NAME: payments
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_ENDPOINT}
@@ -102,11 +112,15 @@ services:
 
   inventory:
     image: ${IMAGE_PREFIX}-inventory:${IMAGE_TAG:-latest}
+    secrets:
+      - source: database_url_inventory
+        target: database_url
+      - source: redis_url_inventory
+        target: redis_url
+      - source: kafka_brokers
+        target: kafka_brokers
     environment:
       PORT: "3000"
-      DATABASE_URL: ${DATABASE_URL_INVENTORY}
-      KAFKA_BROKERS: ${KAFKA_BROKERS}
-      REDIS_URL: ${REDIS_URL_INVENTORY}
       OTEL_SERVICE_NAME: inventory
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_ENDPOINT}
       NODE_OPTIONS: --require=/app/tracing.js
@@ -143,11 +157,15 @@ services:
 
   notifications:
     image: ${IMAGE_PREFIX}-notifications:${IMAGE_TAG:-latest}
+    secrets:
+      - source: database_url_notifications
+        target: database_url
+      - source: redis_url_notifications
+        target: redis_url
+      - source: kafka_brokers
+        target: kafka_brokers
     environment:
       PORT: "3000"
-      DATABASE_URL: ${DATABASE_URL_NOTIFICATIONS}
-      KAFKA_BROKERS: ${KAFKA_BROKERS}
-      REDIS_URL: ${REDIS_URL_NOTIFICATIONS}
       SENDER_EMAIL: ${SENDER_EMAIL:-ops@example.com}
       OTEL_SERVICE_NAME: notifications
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_ENDPOINT}
@@ -182,6 +200,26 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+
+secrets:
+  database_url_orders:
+    external: true
+  database_url_payments:
+    external: true
+  database_url_inventory:
+    external: true
+  database_url_notifications:
+    external: true
+  redis_url_orders:
+    external: true
+  redis_url_payments:
+    external: true
+  redis_url_inventory:
+    external: true
+  redis_url_notifications:
+    external: true
+  kafka_brokers:
+    external: true
 
 networks:
   backend:

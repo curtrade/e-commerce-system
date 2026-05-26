@@ -149,13 +149,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Copy stack file
+      - name: Copy stack file and scripts
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SWARM_HOST }}
           username: ${{ secrets.SWARM_USER }}
           key: ${{ secrets.SWARM_SSH_KEY }}
-          source: docker-stack.yml
+          source: "docker-stack.yml,scripts/create-swarm-secrets.sh"
           target: /opt/ecommerce/
 
       - name: Run migrations & deploy
@@ -175,7 +175,10 @@ jobs:
 
             echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
 
-            set -a && source /opt/ecommerce/.env && set +a
+            set -a
+            source /opt/ecommerce/.env.secrets
+            source /opt/ecommerce/.env
+            set +a
             export IMAGE_TAG="${IMAGE_TAG}"
             export IMAGE_PREFIX="${IMAGE_PREFIX}"
 
@@ -210,13 +213,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Copy stack file
+      - name: Copy stack file and scripts
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SWARM_HOST }}
           username: ${{ secrets.SWARM_USER }}
           key: ${{ secrets.SWARM_SSH_KEY }}
-          source: docker-stack.yml
+          source: "docker-stack.yml,scripts/create-swarm-secrets.sh"
           target: /opt/ecommerce/
 
       - name: Run migrations & deploy
@@ -236,7 +239,10 @@ jobs:
 
             echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
 
-            set -a && source /opt/ecommerce/.env && set +a
+            set -a
+            source /opt/ecommerce/.env.secrets
+            source /opt/ecommerce/.env
+            set +a
             export IMAGE_TAG="${IMAGE_TAG}"
             export IMAGE_PREFIX="${IMAGE_PREFIX}"
 
