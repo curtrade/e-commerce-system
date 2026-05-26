@@ -45,7 +45,7 @@ jobs:
       - id: vars
         run: echo "sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@v3.0.2
         id: filter
         if: github.event_name == 'push'
         with:
@@ -81,8 +81,10 @@ jobs:
 
       - id: result
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.deploy_all }}" = "true" ]; then
             echo 'services=["orders","payments","inventory","notifications"]' >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo 'services=[]' >> "$GITHUB_OUTPUT"
           else
             echo 'services=${{ steps.filter.outputs.changes }}' >> "$GITHUB_OUTPUT"
           fi
@@ -155,11 +157,11 @@ jobs:
           host: ${{ secrets.SWARM_HOST }}
           username: ${{ secrets.SWARM_USER }}
           key: ${{ secrets.SWARM_SSH_KEY }}
-          source: "docker-stack.yml,scripts/create-swarm-secrets.sh"
+          source: "docker-stack.yml,scripts/deploy.sh,scripts/create-swarm-secrets.sh"
           target: /opt/ecommerce/
 
       - name: Run migrations & deploy
-        uses: appleboy/ssh-action@v1
+        uses: appleboy/ssh-action@v1.2.0
         env:
           IMAGE_TAG: sha-${{ needs.changes.outputs.sha_short }}
           IMAGE_PREFIX: ${{ env.IMAGE_PREFIX }}
@@ -171,36 +173,8 @@ jobs:
           key: ${{ secrets.SWARM_SSH_KEY }}
           envs: IMAGE_TAG,IMAGE_PREFIX,GHCR_TOKEN,GHCR_USER
           script: |
-            set -euo pipefail
-
-            echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
-
-            set -a
-            source /opt/ecommerce/.env.secrets
-            source /opt/ecommerce/.env
-            set +a
-            export IMAGE_TAG="${IMAGE_TAG}"
-            export IMAGE_PREFIX="${IMAGE_PREFIX}"
-
-            docker run --rm --network ecommerce_default \
-              -e "DATABASE_URL=${DATABASE_URL_ORDERS}" \
-              "${IMAGE_PREFIX}-orders-migrate:${IMAGE_TAG}"
-
-            docker run --rm --network ecommerce_default \
-              -e "DATABASE_URL=${DATABASE_URL_PAYMENTS}" \
-              "${IMAGE_PREFIX}-payments-migrate:${IMAGE_TAG}"
-
-            docker run --rm --network ecommerce_default \
-              -e "DATABASE_URL=${DATABASE_URL_INVENTORY}" \
-              "${IMAGE_PREFIX}-inventory-migrate:${IMAGE_TAG}"
-
-            docker run --rm --network ecommerce_default \
-              -e "DATABASE_URL=${DATABASE_URL_NOTIFICATIONS}" \
-              "${IMAGE_PREFIX}-notifications-migrate:${IMAGE_TAG}"
-
-            docker stack deploy \
-              -c /opt/ecommerce/docker-stack.yml \
-              --with-registry-auth ecommerce
+            chmod +x /opt/ecommerce/scripts/deploy.sh
+            /opt/ecommerce/scripts/deploy.sh
 
   # ---------------------------------------------------------------------------
   # 4. Deploy → Production (manual approval via GitHub Environment)
@@ -219,11 +193,11 @@ jobs:
           host: ${{ secrets.SWARM_HOST }}
           username: ${{ secrets.SWARM_USER }}
           key: ${{ secrets.SWARM_SSH_KEY }}
-          source: "docker-stack.yml,scripts/create-swarm-secrets.sh"
+          source: "docker-stack.yml,scripts/deploy.sh,scripts/create-swarm-secrets.sh"
           target: /opt/ecommerce/
 
       - name: Run migrations & deploy
-        uses: appleboy/ssh-action@v1
+        uses: appleboy/ssh-action@v1.2.0
         env:
           IMAGE_TAG: sha-${{ needs.changes.outputs.sha_short }}
           IMAGE_PREFIX: ${{ env.IMAGE_PREFIX }}
@@ -235,33 +209,5 @@ jobs:
           key: ${{ secrets.SWARM_SSH_KEY }}
           envs: IMAGE_TAG,IMAGE_PREFIX,GHCR_TOKEN,GHCR_USER
           script: |
-            set -euo pipefail
-
-            echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
-
-            set -a
-            source /opt/ecommerce/.env.secrets
-            source /opt/ecommerce/.env
-            set +a
-            export IMAGE_TAG="${IMAGE_TAG}"
-            export IMAGE_PREFIX="${IMAGE_PREFIX}"
-
-            docker run --rm --network ecommerce_default \
-              -e "DATABASE_URL=${DATABASE_URL_ORDERS}" \
-              "${IMAGE_PREFIX}-orders-migrate:${IMAGE_TAG}"
-
-            docker run --rm --network ecommerce_default \
-              -e "DATABASE_URL=${DATABASE_URL_PAYMENTS}" \
-              "${IMAGE_PREFIX}-payments-migrate:${IMAGE_TAG}"
-
-            docker run --rm --network ecommerce_default \
-              -e "DATABASE_URL=${DATABASE_URL_INVENTORY}" \
-              "${IMAGE_PREFIX}-inventory-migrate:${IMAGE_TAG}"
-
-            docker run --rm --network ecommerce_default \
-              -e "DATABASE_URL=${DATABASE_URL_NOTIFICATIONS}" \
-              "${IMAGE_PREFIX}-notifications-migrate:${IMAGE_TAG}"
-
-            docker stack deploy \
-              -c /opt/ecommerce/docker-stack.yml \
-              --with-registry-auth ecommerce
+            chmod +x /opt/ecommerce/scripts/deploy.sh
+            /opt/ecommerce/scripts/deploy.sh

@@ -11,7 +11,7 @@ import {
   ORDERS_TOPIC,
 } from '@app/common';
 import { AppConfiguration } from './app.configuration';
-import { HealthController } from './health.controller';
+import { HealthController, SERVICE_NAME } from './health.controller';
 import { InventoryConsumer } from './inventory.consumer';
 import { InventoryController } from './inventory.controller';
 import { InventoryReaper } from './inventory.reaper';
@@ -37,6 +37,7 @@ import { InventoryService } from './inventory.service';
   controllers: [HealthController, InventoryController],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: SERVICE_NAME, useValue: 'inventory' },
     InventoryService,
     InventoryConsumer,
     InventoryReaper,

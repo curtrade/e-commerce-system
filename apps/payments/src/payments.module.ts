@@ -4,7 +4,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AppLoggerModule, PgModule, RedisModule } from '@app/common';
 import { AppConfiguration } from './app.configuration';
-import { HealthController } from './health.controller';
+import { HealthController, SERVICE_NAME } from './health.controller';
 import { PaymentsController } from './payments.controller';
 import { PaymentsService } from './payments.service';
 
@@ -27,6 +27,7 @@ import { PaymentsService } from './payments.service';
   controllers: [HealthController, PaymentsController],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: SERVICE_NAME, useValue: 'payments' },
     PaymentsService,
   ],
 })

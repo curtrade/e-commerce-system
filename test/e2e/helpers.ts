@@ -1,21 +1,34 @@
-import { Client } from 'pg';
+import { Pool } from 'pg';
 
 export const ORDERS_URL = 'http://localhost:3001';
+
+const pools = new Map<string, Pool>();
+
+function getPool(db: string): Pool {
+  let pool = pools.get(db);
+  if (!pool) {
+    pool = new Pool({
+      connectionString: `postgres://postgres:postgres@localhost:5432/${db}`,
+      max: 3,
+    });
+    pools.set(db, pool);
+  }
+  return pool;
+}
 
 export async function pgQuery<T extends Record<string, unknown>>(
   db: string,
   sql: string,
   params: unknown[] = [],
 ) {
-  const client = new Client({
-    connectionString: `postgres://postgres:postgres@localhost:5432/${db}`,
-  });
-  await client.connect();
-  try {
-    return await client.query<T>(sql, params);
-  } finally {
-    await client.end();
+  return getPool(db).query<T>(sql, params);
+}
+
+export async function closePools() {
+  for (const pool of pools.values()) {
+    await pool.end();
   }
+  pools.clear();
 }
 
 export async function waitFor(

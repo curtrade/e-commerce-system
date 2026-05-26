@@ -57,7 +57,7 @@ services:
       restart_policy:
         condition: on-failure
         delay: 5s
-        max_attempts: 3
+        max_attempts: 10
         window: 120s
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health || exit 1"]
@@ -101,7 +101,7 @@ services:
       restart_policy:
         condition: on-failure
         delay: 5s
-        max_attempts: 3
+        max_attempts: 10
         window: 120s
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health || exit 1"]
@@ -146,7 +146,7 @@ services:
       restart_policy:
         condition: on-failure
         delay: 5s
-        max_attempts: 3
+        max_attempts: 10
         window: 120s
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health || exit 1"]
@@ -174,7 +174,7 @@ services:
     networks:
       - backend
     deploy:
-      replicas: 1
+      replicas: 2
       update_config:
         parallelism: 1
         delay: 10s
@@ -184,15 +184,15 @@ services:
         parallelism: 1
       resources:
         limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
           cpus: "0.25"
           memory: 256M
-        reservations:
-          cpus: "0.10"
-          memory: 128M
       restart_policy:
         condition: on-failure
         delay: 5s
-        max_attempts: 3
+        max_attempts: 10
         window: 120s
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health || exit 1"]

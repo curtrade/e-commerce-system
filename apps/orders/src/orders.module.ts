@@ -13,7 +13,7 @@ import {
 import { AppConfiguration } from './app.configuration';
 import { InventoryClient } from './clients/inventory.client';
 import { PaymentsClient } from './clients/payments.client';
-import { HealthController } from './health.controller';
+import { HealthController, SERVICE_NAME } from './health.controller';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
 import { OutboxPublisher } from './outbox.publisher';
@@ -40,6 +40,7 @@ import { SagaRecoveryService } from './saga-recovery.service';
   controllers: [HealthController, OrdersController],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: SERVICE_NAME, useValue: 'orders' },
     OrdersService,
     InventoryClient,
     PaymentsClient,

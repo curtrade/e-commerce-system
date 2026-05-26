@@ -28,7 +28,7 @@ SECRETS="
 
 for name in $SECRETS; do
   var=$(echo "$name" | tr '[:lower:]' '[:upper:]')
-  value=$(grep "^${var}=" "$ENV_FILE" | cut -d= -f2-)
+  value=$(grep "^${var}=" "$ENV_FILE" | cut -d= -f2- | sed 's/^"//;s/"$//;s/^'"'"'//;s/'"'"'$//')
 
   if [ -z "$value" ]; then
     echo "SKIP $name (${var} not found in $ENV_FILE)"

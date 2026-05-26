@@ -63,8 +63,6 @@ const shutdown = async () => {
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error('OTEL shutdown failed', err);
-  } finally {
-    process.exit(0);
   }
 };
 process.on('SIGTERM', () => {

@@ -10,4 +10,6 @@ for secret in /run/secrets/*; do
   export "$var"="$(cat "$secret")"
 done
 
+: "${DATABASE_URL:?DATABASE_URL not set — check /run/secrets/database_url}"
+
 exec "$@"

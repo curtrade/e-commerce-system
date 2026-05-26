@@ -56,3 +56,16 @@ jobs:
       - run: npm ci
       - run: npm run prisma:generate
       - run: npm run test:integration
+
+  test-e2e:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run prisma:generate
+      - run: npm run test:e2e
