@@ -9,17 +9,31 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Response } from 'express';
-import { Prisma } from '.prisma/client-orders';
+import {
+  PrismaClientKnownRequestError,
+  PrismaClientUnknownRequestError,
+} from '@prisma/client/runtime/library';
 
-@Catch(Prisma.PrismaClientKnownRequestError)
+@Catch(PrismaClientKnownRequestError, PrismaClientUnknownRequestError)
 export class PrismaExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(PrismaExceptionFilter.name);
 
-  catch(err: Prisma.PrismaClientKnownRequestError, host: ArgumentsHost): void {
+  catch(
+    err: PrismaClientKnownRequestError | PrismaClientUnknownRequestError,
+    host: ArgumentsHost,
+  ): void {
     if (host.getType() !== 'http') {
       throw err;
     }
     const res = host.switchToHttp().getResponse<Response>();
+
+    if (err instanceof PrismaClientUnknownRequestError) {
+      this.logger.error(`Unknown Prisma error: ${err.message}`, err.stack);
+      res
+        .status(HttpStatus.INTERNAL_SERVER_ERROR)
+        .json({ statusCode: 500, message: 'Database error' });
+      return;
+    }
 
     switch (err.code) {
       case 'P2002': {
@@ -43,7 +57,6 @@ export class PrismaExceptionFilter implements ExceptionFilter {
         return;
       }
       default: {
-        // Log the raw Prisma error server-side; never leak code/meta to the client.
         this.logger.error(
           `Unhandled Prisma error ${err.code}: ${err.message}`,
           err.stack,

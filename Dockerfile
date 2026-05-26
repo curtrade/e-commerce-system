@@ -25,13 +25,29 @@ RUN if [ -f "apps/${SERVICE}/prisma/schema.prisma" ]; then \
       npx prisma generate --schema "apps/${SERVICE}/prisma/schema.prisma"; \
     fi
 RUN npx nest build ${SERVICE}
-RUN npm prune --omit=dev
 # Stage the service's prisma directory (if any) at a stable path so the runtime
 # stage can COPY it unconditionally — Docker COPY has no native if-exists.
 RUN mkdir -p /app/_prisma && \
     if [ -d "apps/${SERVICE}/prisma" ]; then \
       cp -r "apps/${SERVICE}/prisma/." /app/_prisma/; \
     fi
+# Stash prisma CLI before pruning (used by migrate stage only).
+RUN cp -r node_modules/prisma /tmp/prisma-cli
+RUN npm prune --omit=dev
+
+# --- migrate --------------------------------------------------------------
+# Lightweight stage for `prisma migrate deploy` — includes the CLI that the
+# runtime stage intentionally excludes (~50 MB savings per service image).
+FROM node:${NODE_VERSION} AS migrate
+ARG SERVICE
+WORKDIR /app
+RUN addgroup -g 1001 -S app && adduser -S app -u 1001
+COPY --from=build --chown=app:app /app/node_modules ./node_modules
+COPY --from=build --chown=app:app /tmp/prisma-cli ./node_modules/prisma
+COPY --from=build --chown=app:app /app/_prisma ./_prisma
+COPY --from=build --chown=app:app /app/package.json ./
+USER app
+CMD ["sh", "-c", "for i in 1 2 3; do npx prisma migrate deploy --schema=_prisma/schema.prisma && exit 0; echo \"migrate attempt $i failed, retrying in 3s...\"; sleep 3; done; exit 1"]
 
 # --- runtime --------------------------------------------------------------
 FROM node:${NODE_VERSION} AS runtime
