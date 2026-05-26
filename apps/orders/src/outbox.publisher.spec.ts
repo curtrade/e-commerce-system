@@ -1,16 +1,18 @@
 jest.mock('@app/common', () => {
-  const actual = jest.requireActual('@app/common');
+  const actual = jest.requireActual<Record<string, unknown>>('@app/common');
   return {
     ...actual,
-    withSpan: jest.fn(async (_tracer, _span, fn, _opts) => {
-      const fakeSpan = {
-        setAttribute: jest.fn(),
-        recordException: jest.fn(),
-        setStatus: jest.fn(),
-        end: jest.fn(),
-      };
-      return fn(fakeSpan);
-    }),
+    withSpan: jest.fn(
+      (_tracer: unknown, _span: string, fn: (span: unknown) => unknown) => {
+        const fakeSpan = {
+          setAttribute: jest.fn(),
+          recordException: jest.fn(),
+          setStatus: jest.fn(),
+          end: jest.fn(),
+        };
+        return fn(fakeSpan);
+      },
+    ),
   };
 });
 
@@ -44,12 +46,17 @@ function setup() {
   const scheduler = {
     addInterval: jest.fn(),
   } as unknown as jest.Mocked<SchedulerRegistry>;
-  const publisher = new OutboxPublisher(pg.service, producer.service, scheduler);
+  const publisher = new OutboxPublisher(
+    pg.service,
+    producer.service,
+    scheduler,
+  );
   return { publisher, pg, producer, scheduler };
 }
 
 type Tick = () => Promise<void>;
-const tick = (p: OutboxPublisher): Tick => (p as unknown as { tick: Tick }).tick;
+const tick = (p: OutboxPublisher): Tick =>
+  (p as unknown as { tick: Tick }).tick;
 
 describe('OutboxPublisher', () => {
   beforeEach(() => {
@@ -104,7 +111,7 @@ describe('OutboxPublisher', () => {
       expect(value).toEqual({
         eventId: 'r-1',
         eventType: 'OrderConfirmed',
-        occurredAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+        occurredAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/) as string,
         payload: { hello: 'world' },
       });
 
@@ -197,12 +204,15 @@ describe('OutboxPublisher', () => {
     it('passes row.trace_context to withSpan as parentTraceparent', async () => {
       const s = setup();
       const tp = '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01';
-      s.pg.query.mockResolvedValueOnce(pgResult([makeRow({ trace_context: tp })]));
+      s.pg.query.mockResolvedValueOnce(
+        pgResult([makeRow({ trace_context: tp })]),
+      );
 
       await tick(s.publisher).call(s.publisher);
 
       expect(withSpanMock).toHaveBeenCalledTimes(1);
-      const opts = withSpanMock.mock.calls[0][3];
+      const call = withSpanMock.mock.calls[0] as unknown[];
+      const opts = call[3] as Record<string, unknown>;
       expect(opts).toEqual({ parentTraceparent: tp });
     });
 

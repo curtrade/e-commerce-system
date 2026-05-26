@@ -1,0 +1,189 @@
+# Docker Swarm stack — application services only.
+# Infrastructure (Postgres, Redis, Kafka, OTEL collector) is external.
+#
+# Required env vars on the Swarm manager (source from /opt/ecommerce/.env):
+#   IMAGE_PREFIX, IMAGE_TAG,
+#   DATABASE_URL_ORDERS, DATABASE_URL_PAYMENTS,
+#   DATABASE_URL_INVENTORY, DATABASE_URL_NOTIFICATIONS,
+#   KAFKA_BROKERS, REDIS_URL_ORDERS, REDIS_URL_PAYMENTS,
+#   REDIS_URL_INVENTORY, REDIS_URL_NOTIFICATIONS,
+#   OTEL_ENDPOINT, LOG_LEVEL (optional), SENDER_EMAIL (optional)
+
+services:
+  orders:
+    image: ${IMAGE_PREFIX}-orders:${IMAGE_TAG:-latest}
+    environment:
+      PORT: "3000"
+      DATABASE_URL: ${DATABASE_URL_ORDERS}
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
+      REDIS_URL: ${REDIS_URL_ORDERS}
+      INVENTORY_URL: http://inventory:3000
+      PAYMENTS_URL: http://payments:3000
+      RESERVATION_TTL_SEC: ${RESERVATION_TTL_SEC:-900}
+      SAGA_TIMEOUT_SEC: ${SAGA_TIMEOUT_SEC:-60}
+      OTEL_SERVICE_NAME: orders
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_ENDPOINT}
+      NODE_OPTIONS: --require=/app/tracing.js
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    networks:
+      - backend
+    ports:
+      - target: 3000
+        published: 3001
+        mode: ingress
+    deploy:
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  payments:
+    image: ${IMAGE_PREFIX}-payments:${IMAGE_TAG:-latest}
+    environment:
+      PORT: "3000"
+      DATABASE_URL: ${DATABASE_URL_PAYMENTS}
+      REDIS_URL: ${REDIS_URL_PAYMENTS}
+      FAILURE_RATE: "0"
+      OTEL_SERVICE_NAME: payments
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_ENDPOINT}
+      NODE_OPTIONS: --require=/app/tracing.js
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    networks:
+      - backend
+    deploy:
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  inventory:
+    image: ${IMAGE_PREFIX}-inventory:${IMAGE_TAG:-latest}
+    environment:
+      PORT: "3000"
+      DATABASE_URL: ${DATABASE_URL_INVENTORY}
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
+      REDIS_URL: ${REDIS_URL_INVENTORY}
+      OTEL_SERVICE_NAME: inventory
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_ENDPOINT}
+      NODE_OPTIONS: --require=/app/tracing.js
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    networks:
+      - backend
+    deploy:
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  notifications:
+    image: ${IMAGE_PREFIX}-notifications:${IMAGE_TAG:-latest}
+    environment:
+      PORT: "3000"
+      DATABASE_URL: ${DATABASE_URL_NOTIFICATIONS}
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
+      REDIS_URL: ${REDIS_URL_NOTIFICATIONS}
+      SENDER_EMAIL: ${SENDER_EMAIL:-ops@example.com}
+      OTEL_SERVICE_NAME: notifications
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_ENDPOINT}
+      NODE_OPTIONS: --require=/app/tracing.js
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    networks:
+      - backend
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+        reservations:
+          cpus: "0.10"
+          memory: 128M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+networks:
+  backend:
+    driver: overlay
+    attachable: true

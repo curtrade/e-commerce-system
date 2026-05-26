@@ -4,10 +4,7 @@ import { PgService, KafkaProducerService } from '@app/common';
 import { OutboxPublisher } from './outbox.publisher';
 import { createTestPg } from '../../../test/helpers/pg-test';
 import { truncateOrders } from '../../../test/helpers/truncate';
-import {
-  createMockKafkaProducer,
-  MockKafkaProducer,
-} from '../../../test/helpers/mock-factories';
+import { createMockKafkaProducer } from '../../../test/helpers/mock-factories';
 
 type Tick = () => Promise<void>;
 const tick = (p: OutboxPublisher): Tick =>
@@ -65,7 +62,9 @@ describe('OutboxPublisher (integration)', () => {
     await tick(pub)();
 
     expect(producer.send).toHaveBeenCalledTimes(N);
-    const sentIds = producer.send.mock.calls.map((c) => c[2] as { eventId: string });
+    const sentIds = producer.send.mock.calls.map(
+      (c) => c[2] as { eventId: string },
+    );
     expect(sentIds.map((e) => e.eventId).sort()).toEqual([...ids].sort());
 
     const { rows } = await pg.query<{ unpublished: number }>(

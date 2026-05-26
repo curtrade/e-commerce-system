@@ -89,12 +89,10 @@ describe('InventoryService.reserve', () => {
     const insertParams = calls[3][1] as unknown[];
     expect(insertParams[0]).toBe(res.reservationId);
     expect(insertParams[1]).toBe('o-1');
-    const itemsJson = JSON.parse(insertParams[2] as string);
-    expect(itemsJson.map((it: { sku: string }) => it.sku)).toEqual([
-      'SKU-A',
-      'SKU-M',
-      'SKU-Z',
-    ]);
+    const itemsJson = JSON.parse(insertParams[2] as string) as {
+      sku: string;
+    }[];
+    expect(itemsJson.map((it) => it.sku)).toEqual(['SKU-A', 'SKU-M', 'SKU-Z']);
   });
 
   it('caches reservation in Redis with 24h TTL', async () => {
@@ -189,9 +187,9 @@ describe('InventoryService.commit', () => {
         pgResult([{ id: 'r-1', items: [], status }]),
       );
 
-      await expect(
-        s.service.commit({ reservationId: 'r-1' }),
-      ).rejects.toThrow(ConflictException);
+      await expect(s.service.commit({ reservationId: 'r-1' })).rejects.toThrow(
+        ConflictException,
+      );
     },
   );
 
@@ -229,9 +227,7 @@ describe('InventoryService.expirePending', () => {
 
   it('selects PENDING reservations past expires_at and releases each one', async () => {
     const s = setup();
-    s.pg.query.mockResolvedValueOnce(
-      pgResult([{ id: 'r-1' }, { id: 'r-2' }]),
-    );
+    s.pg.query.mockResolvedValueOnce(pgResult([{ id: 'r-1' }, { id: 'r-2' }]));
     // Each release call: SELECT → empty items → UPDATE reservation status.
     // To keep this simple, mock release to succeed via the tx client returning
     // a PENDING reservation each time.

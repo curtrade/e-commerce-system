@@ -20,7 +20,7 @@ describe('PaymentsController', () => {
 
     const err = (() => {
       try {
-        controller.charge(dto, undefined);
+        void controller.charge(dto, undefined);
         return null;
       } catch (e) {
         return e as Error;

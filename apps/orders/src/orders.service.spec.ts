@@ -2,15 +2,10 @@ import { OrdersService } from './orders.service';
 import { AppConfiguration } from './app.configuration';
 import { InventoryClient } from './clients/inventory.client';
 import { PaymentsClient } from './clients/payments.client';
-import {
-  createMockPg,
-  pgResult,
-} from '../../../test/helpers/mock-factories';
+import { createMockPg, pgResult } from '../../../test/helpers/mock-factories';
 import { CreateOrderDto } from './dto/create-order.dto';
 
-type MockInventory = jest.Mocked<
-  Pick<InventoryClient, 'reserve' | 'release'>
->;
+type MockInventory = jest.Mocked<Pick<InventoryClient, 'reserve' | 'release'>>;
 type MockPayments = jest.Mocked<Pick<PaymentsClient, 'charge'>>;
 
 const ITEMS = [
@@ -34,7 +29,10 @@ function setup() {
   };
   // Pick non-default values so a hardcoded 900/60 in OrdersService would
   // fail these tests instead of silently passing.
-  const cfg = { reservationTtlSec: 12345, sagaTimeoutSec: 999 } as AppConfiguration;
+  const cfg = {
+    reservationTtlSec: 12345,
+    sagaTimeoutSec: 999,
+  } as AppConfiguration;
   const service = new OrdersService(
     pg.service,
     inventory as unknown as InventoryClient,
@@ -108,7 +106,10 @@ describe('OrdersService.createOrder', () => {
       const [insertSql, insertParams] = s.pg.txClientQuery.mock.calls[1];
       expect(insertSql).toMatch(/INSERT INTO orders_outbox/);
       expect(insertParams![3]).toBe('OrderConfirmed');
-      const payload = JSON.parse(insertParams![4] as string);
+      const payload = JSON.parse(insertParams![4] as string) as Record<
+        string,
+        unknown
+      >;
       expect(payload).toMatchObject({
         orderId: result.orderId,
         reservationId: 'res-1',
@@ -162,7 +163,10 @@ describe('OrdersService.createOrder', () => {
       const [insertSql, insertParams] = s.pg.txClientQuery.mock.calls[1];
       expect(insertSql).toMatch(/INSERT INTO orders_outbox/);
       expect(insertParams![3]).toBe('OrderFailed');
-      const payload = JSON.parse(insertParams![4] as string);
+      const payload = JSON.parse(insertParams![4] as string) as Record<
+        string,
+        unknown
+      >;
       expect(payload).toEqual({
         orderId: result.orderId,
         reason: 'out of stock',
@@ -172,7 +176,7 @@ describe('OrdersService.createOrder', () => {
 
     it('returns FAILED_INVENTORY with reason', () => {
       expect(result).toEqual({
-        orderId: expect.stringMatching(UUID_RE),
+        orderId: expect.stringMatching(UUID_RE) as string,
         status: 'FAILED_INVENTORY',
         reason: 'out of stock',
       });
@@ -216,7 +220,10 @@ describe('OrdersService.createOrder', () => {
 
       const insertParams = s.pg.txClientQuery.mock.calls[1][1];
       expect(insertParams![3]).toBe('OrderFailed');
-      const payload = JSON.parse(insertParams![4] as string);
+      const payload = JSON.parse(insertParams![4] as string) as Record<
+        string,
+        unknown
+      >;
       expect(payload).toEqual({
         orderId: result.orderId,
         reservationId: 'res-1',
@@ -302,7 +309,9 @@ describe('OrdersService.recoverStuckOrders', () => {
     ]);
     const firstInsert = s.pg.txClientQuery.mock.calls[1][1];
     expect(firstInsert![3]).toBe('OrderFailed');
-    expect(JSON.parse(firstInsert![4] as string)).toEqual({
+    expect(
+      JSON.parse(firstInsert![4] as string) as Record<string, unknown>,
+    ).toEqual({
       orderId: 'order-1',
       reservationId: 'res-1',
       reason: 'saga recovery: PENDING beyond timeout',
@@ -310,7 +319,10 @@ describe('OrdersService.recoverStuckOrders', () => {
 
     // Second failOrder: no reservation_id.
     const secondInsert = s.pg.txClientQuery.mock.calls[3][1];
-    const secondPayload = JSON.parse(secondInsert![4] as string);
+    const secondPayload = JSON.parse(secondInsert![4] as string) as Record<
+      string,
+      unknown
+    >;
     expect(secondPayload.reservationId).toBeUndefined();
     expect(secondPayload.orderId).toBe('order-2');
   });

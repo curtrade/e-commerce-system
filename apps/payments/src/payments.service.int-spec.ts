@@ -67,8 +67,10 @@ describe('PaymentsService (integration)', () => {
       const rawClient = redis.raw();
       const getSpy = jest
         .spyOn(rawClient, 'get')
-        .mockImplementation(async (key: unknown) =>
-          typeof key === 'string' && key.startsWith('pay:idem:') ? null : '',
+        .mockImplementation((key: unknown) =>
+          Promise.resolve(
+            typeof key === 'string' && key.startsWith('pay:idem:') ? null : '',
+          ),
         );
 
       try {
@@ -95,7 +97,7 @@ describe('PaymentsService (integration)', () => {
 
       const cached = await redis.raw().get(`pay:idem:${idem}`);
       expect(cached).not.toBeNull();
-      const parsed = JSON.parse(cached!);
+      const parsed = JSON.parse(cached!) as { status: string };
       expect(parsed.status).toBe('CHARGED');
 
       const ttl = await redis.raw().ttl(`pay:idem:${idem}`);
@@ -140,9 +142,9 @@ describe('PaymentsService (integration)', () => {
       );
       const id = rows[0].id;
 
-      await expect(svc.refund({ paymentId: id, reason: 'try' })).rejects.toThrow(
-        /Cannot refund payment in FAILED/,
-      );
+      await expect(
+        svc.refund({ paymentId: id, reason: 'try' }),
+      ).rejects.toThrow(/Cannot refund payment in FAILED/);
     });
   });
 });
