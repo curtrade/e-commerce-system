@@ -85,6 +85,20 @@ auth выключен — UI открывается на `http://localhost:3000`
 - **Env**: `OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT` (base, без `/v1/...`), `LOG_LEVEL` (по умолчанию `info`).
 - **Ограничение**: миграция `0_init` (Prisma baseline) содержит `trace_context` вместо устаревшей `trace_id`; строки в outbox до миграции опубликуются как новые корни трасс.
 
+## API-документация (Swagger / OpenAPI)
+
+Каждый HTTP-сервис отдаёт интерактивную документацию на `/docs`:
+
+| Сервис | URL | Эндпоинты |
+|---|---|---|
+| orders | `http://localhost:3001/docs` | `POST /orders`, `GET /orders/:id` |
+| payments | `http://localhost:3002/docs` | `POST /payments/charge`, `POST /payments/refund`, `GET /payments/by-order/:orderId` |
+| inventory | `http://localhost:3003/docs` | `POST /inventory/reserve`, `POST /inventory/release`, `POST /inventory/commit` |
+
+- **CLI-плагин** `@nestjs/swagger` (настроен в `nest-cli.json`) автоматически генерирует `@ApiProperty` из TypeScript-типов и `class-validator`-декораторов — DTO-поля видны в Swagger без ручных аннотаций.
+- **`@ApiHeader({ name: 'idempotency-key' })`** на `inventory/reserve` и `payments/charge` — Swagger UI показывает обязательный заголовок.
+- **JSON-схема** доступна по `GET /docs-json` (для кодогенерации клиентов).
+
 ## Security
 
 - **Helmet** — все 4 сервиса: `X-Content-Type-Options`, `X-Frame-Options`, `Strict-Transport-Security` и другие заголовки.
