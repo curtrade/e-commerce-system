@@ -1,14 +1,23 @@
 import { HttpStatus, Logger } from '@nestjs/common';
 import { ArgumentsHost } from '@nestjs/common';
-import { Prisma } from '.prisma/client-notifications';
+import {
+  PrismaClientKnownRequestError,
+  PrismaClientUnknownRequestError,
+} from '@prisma/client/runtime/library';
 import { PrismaExceptionFilter } from './prisma-exception.filter';
 
-function makePrismaError(
+function makeKnownError(
   code: string,
   message = 'prisma error',
-): Prisma.PrismaClientKnownRequestError {
-  return new Prisma.PrismaClientKnownRequestError(message, {
+): PrismaClientKnownRequestError {
+  return new PrismaClientKnownRequestError(message, {
     code,
+    clientVersion: '6.0.0',
+  });
+}
+
+function makeUnknownError(message = 'unknown prisma error'): PrismaClientUnknownRequestError {
+  return new PrismaClientUnknownRequestError(message, {
     clientVersion: '6.0.0',
   });
 }
@@ -35,7 +44,7 @@ describe('PrismaExceptionFilter', () => {
 
   it('P2002 → 409 Conflict', () => {
     const { host, status, json } = makeHost();
-    filter.catch(makePrismaError('P2002'), host);
+    filter.catch(makeKnownError('P2002'), host);
 
     expect(status).toHaveBeenCalledWith(HttpStatus.CONFLICT);
     expect(json).toHaveBeenCalledWith(
@@ -45,7 +54,7 @@ describe('PrismaExceptionFilter', () => {
 
   it('P2025 → 404 Not Found', () => {
     const { host, status, json } = makeHost();
-    filter.catch(makePrismaError('P2025'), host);
+    filter.catch(makeKnownError('P2025'), host);
 
     expect(status).toHaveBeenCalledWith(HttpStatus.NOT_FOUND);
     expect(json).toHaveBeenCalledWith(
@@ -55,7 +64,7 @@ describe('PrismaExceptionFilter', () => {
 
   it('P2003 → 400 Bad Request (related resource missing)', () => {
     const { host, status, json } = makeHost();
-    filter.catch(makePrismaError('P2003'), host);
+    filter.catch(makeKnownError('P2003'), host);
 
     expect(status).toHaveBeenCalledWith(HttpStatus.BAD_REQUEST);
     expect(json).toHaveBeenCalledWith(
@@ -65,7 +74,7 @@ describe('PrismaExceptionFilter', () => {
 
   it('P2014 → 400 Bad Request (invalid relation)', () => {
     const { host, status, json } = makeHost();
-    filter.catch(makePrismaError('P2014'), host);
+    filter.catch(makeKnownError('P2014'), host);
 
     expect(status).toHaveBeenCalledWith(HttpStatus.BAD_REQUEST);
     expect(json).toHaveBeenCalledWith(
@@ -73,16 +82,10 @@ describe('PrismaExceptionFilter', () => {
     );
   });
 
-  it('non-HTTP context → rethrows the error', () => {
-    const { host } = makeHost('rpc');
-    const err = makePrismaError('P2002');
-    expect(() => filter.catch(err, host)).toThrow(err);
-  });
-
-  it('unknown code → 500 with generic message, logs raw error', () => {
+  it('unknown known-error code → 500 + logs raw error', () => {
     const logSpy = jest.spyOn(Logger.prototype, 'error');
     const { host, status, json } = makeHost();
-    filter.catch(makePrismaError('P2024', 'timeout exceeded'), host);
+    filter.catch(makeKnownError('P2024', 'timeout exceeded'), host);
 
     expect(status).toHaveBeenCalledWith(HttpStatus.INTERNAL_SERVER_ERROR);
     expect(json).toHaveBeenCalledWith({ statusCode: 500, message: 'Database error' });
@@ -90,5 +93,30 @@ describe('PrismaExceptionFilter', () => {
       expect.stringContaining('P2024'),
       expect.anything(),
     );
+  });
+
+  it('PrismaClientUnknownRequestError → 500 + logs raw error', () => {
+    const logSpy = jest.spyOn(Logger.prototype, 'error');
+    const { host, status, json } = makeHost();
+    filter.catch(makeUnknownError('connection reset'), host);
+
+    expect(status).toHaveBeenCalledWith(HttpStatus.INTERNAL_SERVER_ERROR);
+    expect(json).toHaveBeenCalledWith({ statusCode: 500, message: 'Database error' });
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('connection reset'),
+      expect.anything(),
+    );
+  });
+
+  it('non-HTTP context → rethrows the error', () => {
+    const { host } = makeHost('rpc');
+    const err = makeKnownError('P2002');
+    expect(() => filter.catch(err, host)).toThrow(err);
+  });
+
+  it('non-HTTP context → rethrows unknown error', () => {
+    const { host } = makeHost('rpc');
+    const err = makeUnknownError();
+    expect(() => filter.catch(err, host)).toThrow(err);
   });
 });
