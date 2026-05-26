@@ -85,6 +85,19 @@ auth выключен — UI открывается на `http://localhost:3000`
 - **Env**: `OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT` (base, без `/v1/...`), `LOG_LEVEL` (по умолчанию `info`).
 - **Ограничение**: миграция `0_init` (Prisma baseline) содержит `trace_context` вместо устаревшей `trace_id`; строки в outbox до миграции опубликуются как новые корни трасс.
 
+### Alerting
+
+Grafana provisioned alert rules (`scripts/grafana-alerting.yaml`) загружаются при старте:
+
+| Алерт | Источник | Условие | Severity |
+|---|---|---|---|
+| HTTP 5xx > 5% | Prometheus | `rate(5xx) / rate(total) > 0.05` за 5 мин | critical |
+| P95 latency > 2s | Prometheus | `histogram_quantile(0.95) > 2s` за 5 мин | warning |
+| ERROR log spike | Loki | `count_over_time(ERROR) > 10` за 5 мин per service | warning |
+| Outbox dead-letter | Loki | строки с `max attempts` в логах OutboxPublisher | critical |
+
+Contact point по умолчанию — `log` (алерты видны в Grafana UI → Alerting). Для продакшна заменить на Slack webhook или email в `grafana-alerting.yaml`.
+
 ## API-документация (Swagger / OpenAPI)
 
 Каждый HTTP-сервис отдаёт интерактивную документацию на `/docs`:
