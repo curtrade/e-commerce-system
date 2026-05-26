@@ -23,6 +23,7 @@
     "test": "npm run test:unit && npm run test:integration",
     "test:unit": "jest --selectProjects unit",
     "test:integration": "jest --selectProjects integration --runInBand",
+    "test:e2e": "jest --selectProjects e2e --runInBand",
     "test:cov": "jest --coverage",
     "prisma:orders:generate": "prisma generate --schema apps/orders/prisma/schema.prisma",
     "prisma:orders:migrate:dev": "prisma migrate dev --schema apps/orders/prisma/schema.prisma",

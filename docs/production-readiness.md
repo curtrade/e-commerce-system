@@ -14,7 +14,7 @@
 ## Важно (до первых пользователей)
 
 - [x] Swagger/OpenAPI — /docs на orders(:3001), payments(:3002), inventory(:3003)
-- [ ] **E2E-тесты** — 95 unit + integration тестов, но нет полноценного docker-compose E2E-прогона всей системы
+- [x] E2E-тесты (docker compose + Jest: saga happy path, FAILED_INVENTORY, validation, Kafka propagation)
 - [ ] **Алерты в Grafana** — дашборды есть, но нет threshold-алертов (latency, error rate, outbox backlog)
 - [ ] **Бэкапы БД** — нет скриптов backup/restore и cron-расписания
 - [ ] **Реальный email-провайдер** — NotificationsService пишет в БД, но не отправляет (SendGrid / AWS SES)
