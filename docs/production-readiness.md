@@ -13,7 +13,7 @@
 
 ## Важно (до первых пользователей)
 
-- [ ] **Swagger/OpenAPI** — `@nestjs/swagger` не подключён. Без API-документации интеграция с фронтом невозможна
+- [x] Swagger/OpenAPI — /docs на orders(:3001), payments(:3002), inventory(:3003)
 - [ ] **E2E-тесты** — 95 unit + integration тестов, но нет полноценного docker-compose E2E-прогона всей системы
 - [ ] **Алерты в Grafana** — дашборды есть, но нет threshold-алертов (latency, error rate, outbox backlog)
 - [ ] **Бэкапы БД** — нет скриптов backup/restore и cron-расписания
