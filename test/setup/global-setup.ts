@@ -8,7 +8,6 @@ import {
 import { RedisContainer, StartedRedisContainer } from '@testcontainers/redis';
 
 declare global {
-
   var __PG_CONTAINER__: StartedPostgreSqlContainer | undefined;
 
   var __REDIS_CONTAINER__: StartedRedisContainer | undefined;

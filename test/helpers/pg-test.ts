@@ -12,9 +12,7 @@ const ENV_VAR: Record<Service, string> = {
 export function createTestPg(service: Service = 'orders'): PgService {
   const dsn = process.env[ENV_VAR[service]];
   if (!dsn) {
-    throw new Error(
-      `${ENV_VAR[service]} not set — globalSetup did not run?`,
-    );
+    throw new Error(`${ENV_VAR[service]} not set — globalSetup did not run?`);
   }
   const svc = new PgService({ connectionString: dsn });
   svc.onModuleInit();
