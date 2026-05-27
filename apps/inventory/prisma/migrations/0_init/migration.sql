@@ -33,3 +33,10 @@ CREATE TABLE IF NOT EXISTS "reservations" (
 
 -- CreateIndex
 CREATE INDEX IF NOT EXISTS "reservations_status_expiry_idx" ON "reservations"("status", "expires_at");
+
+-- Seed a tiny catalog for happy-path smoke testing.
+INSERT INTO "inventory_items" ("sku", "available") VALUES
+    ('SKU-RED-SHIRT-M', 100),
+    ('SKU-BLUE-MUG',    250),
+    ('SKU-NOTEBOOK-A5', 500)
+ON CONFLICT ("sku") DO NOTHING;

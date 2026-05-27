@@ -11,6 +11,7 @@ function getPool(db: string): Pool {
       connectionString: `postgres://postgres:postgres@localhost:5432/${db}`,
       max: 3,
     });
+    pool.on('error', () => {});
     pools.set(db, pool);
   }
   return pool;

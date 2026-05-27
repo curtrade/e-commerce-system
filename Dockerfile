@@ -43,7 +43,7 @@ COPY --from=deps --chown=app:app /app/node_modules ./node_modules
 COPY --from=build --chown=app:app /app/_prisma ./_prisma
 COPY --from=build --chown=app:app /app/package.json ./
 USER app
-CMD ["sh", "-c", "for i in 1 2 3; do npx prisma migrate deploy --schema=_prisma/schema.prisma && exit 0; echo \"migrate attempt $i failed, retrying in 3s...\"; sleep 3; done; exit 1"]
+CMD ["sh", "-c", "if [ ! -f _prisma/schema.prisma ]; then echo 'ERROR: _prisma/schema.prisma not found'; ls -la _prisma/ 2>&1; exit 1; fi; for i in 1 2 3 4 5; do node_modules/.bin/prisma migrate deploy --schema=_prisma/schema.prisma && exit 0; echo \"migrate attempt $i failed, retrying in 5s...\"; sleep 5; done; exit 1"]
 
 # --- runtime --------------------------------------------------------------
 FROM node:${NODE_VERSION} AS runtime

@@ -88,10 +88,10 @@ describe('Order Saga (E2E)', () => {
   });
 
   describe('payment failure → FAILED_PAYMENT', () => {
-    it('negative unitPrice triggers payment failure', async () => {
+    it('amount below payment minimum triggers payment failure', async () => {
       const { status, body } = await createOrder({
         ...ORDER_BODY,
-        items: [{ sku: 'SKU-BLUE-MUG', qty: 1, unitPrice: -1 }],
+        items: [{ sku: 'SKU-BLUE-MUG', qty: 1, unitPrice: 0.001 }],
       });
 
       expect(status).toBe(201);
