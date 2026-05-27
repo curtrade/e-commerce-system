@@ -25,7 +25,7 @@ describe('InventoryController', () => {
 
     const err = (() => {
       try {
-        controller.reserve(RESERVE, undefined);
+        void controller.reserve(RESERVE, undefined);
         return null;
       } catch (e) {
         return e as Error;
@@ -36,34 +36,34 @@ describe('InventoryController', () => {
     expect(service.reserve).not.toHaveBeenCalled();
   });
 
-  it('POST /reserve forwards DTO and idempotency key', () => {
+  it('POST /reserve forwards DTO and idempotency key', async () => {
     const { controller, service } = setup();
     (service.reserve as jest.Mock).mockResolvedValue({
       reservationId: 'r-1',
       expiresAt: 't',
     });
 
-    controller.reserve(RESERVE, 'idem-x');
+    await controller.reserve(RESERVE, 'idem-x');
 
     expect(service.reserve).toHaveBeenCalledWith(RESERVE, 'idem-x');
   });
 
-  it('POST /release forwards DTO', () => {
+  it('POST /release forwards DTO', async () => {
     const { controller, service } = setup();
     const dto: ReleaseDto = { reservationId: 'r-1' };
     (service.release as jest.Mock).mockResolvedValue({ status: 'RELEASED' });
 
-    controller.release(dto);
+    await controller.release(dto);
 
     expect(service.release).toHaveBeenCalledWith(dto);
   });
 
-  it('POST /commit forwards DTO', () => {
+  it('POST /commit forwards DTO', async () => {
     const { controller, service } = setup();
     const dto: CommitDto = { reservationId: 'r-1' };
     (service.commit as jest.Mock).mockResolvedValue({ status: 'COMMITTED' });
 
-    controller.commit(dto);
+    await controller.commit(dto);
 
     expect(service.commit).toHaveBeenCalledWith(dto);
   });

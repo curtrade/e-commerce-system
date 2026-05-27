@@ -1,4 +1,8 @@
-import type { PgService, RedisService, KafkaProducerService } from '@app/common';
+import type {
+  PgService,
+  RedisService,
+  KafkaProducerService,
+} from '@app/common';
 import type { PoolClient, QueryResult, QueryResultRow } from 'pg';
 
 /** Build a fully-typed `QueryResult` for mocks — avoids `as never` casts. */
@@ -28,8 +32,8 @@ export function createMockPg(): MockPg {
   const txClientQuery = jest.fn() as MockPg['txClientQuery'];
   txClientQuery.mockResolvedValue(pgResult());
 
-  const withTransaction = jest.fn(async (fn: (c: PoolClient) => unknown) =>
-    fn({ query: txClientQuery } as unknown as PoolClient),
+  const withTransaction = jest.fn((fn: (c: PoolClient) => unknown) =>
+    Promise.resolve(fn({ query: txClientQuery } as unknown as PoolClient)),
   );
 
   const query = jest.fn() as MockPg['query'];

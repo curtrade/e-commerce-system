@@ -1,9 +1,6 @@
 import { NotificationsService } from './notifications.service';
 import { AppConfiguration } from './app.configuration';
-import {
-  createMockPg,
-  pgResult,
-} from '../../../test/helpers/mock-factories';
+import { createMockPg, pgResult } from '../../../test/helpers/mock-factories';
 
 function setup() {
   const pg = createMockPg();

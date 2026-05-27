@@ -1,5 +1,7 @@
 import { ConfigifyModule } from '@itgorillaz/configify';
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import {
   AppLoggerModule,
   KafkaConsumerService,
@@ -8,7 +10,7 @@ import {
   RedisModule,
 } from '@app/common';
 import { AppConfiguration } from './app.configuration';
-import { HealthController } from './notifications.controller';
+import { HealthController, SERVICE_NAME } from './notifications.controller';
 import { NotificationsConsumer } from './notifications.consumer';
 import { NotificationsService } from './notifications.service';
 
@@ -16,6 +18,7 @@ import { NotificationsService } from './notifications.service';
   imports: [
     AppLoggerModule,
     ConfigifyModule.forRootAsync(),
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 60 }]),
     PgModule.forRootAsync({
       inject: [AppConfiguration],
       useFactory: (cfg: AppConfiguration) => ({
@@ -29,6 +32,8 @@ import { NotificationsService } from './notifications.service';
   ],
   controllers: [HealthController],
   providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: SERVICE_NAME, useValue: 'notifications' },
     NotificationsService,
     NotificationsConsumer,
     {

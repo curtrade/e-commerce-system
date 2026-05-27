@@ -9,15 +9,18 @@ import {
   Param,
   Post,
 } from '@nestjs/common';
+import { ApiHeader, ApiTags } from '@nestjs/swagger';
 import { ChargeDto, RefundDto } from './dto/charge.dto';
 import { PaymentsService } from './payments.service';
 
+@ApiTags('payments')
 @Controller('payments')
 export class PaymentsController {
   constructor(private readonly payments: PaymentsService) {}
 
   @Post('charge')
   @HttpCode(201)
+  @ApiHeader({ name: 'idempotency-key', required: true })
   charge(@Body() dto: ChargeDto, @Headers('idempotency-key') idemKey?: string) {
     if (!idemKey) {
       throw new BadRequestException('Idempotency-Key header is required');

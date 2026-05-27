@@ -1,14 +1,15 @@
-import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { bootstrapService } from '@app/common';
 import { Logger } from 'nestjs-pino';
-import { InventoryModule } from './inventory.module';
 import { AppConfiguration } from './app.configuration';
+import { InventoryModule } from './inventory.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(InventoryModule, { bufferLogs: true });
-  app.useLogger(app.get(Logger));
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-  app.enableShutdownHooks();
+  const app = await bootstrapService(InventoryModule, {
+    swagger: {
+      title: 'Inventory Service',
+      description: 'Резерв/release/commit стока с TTL и идемпотентностью',
+    },
+  });
   const cfg = app.get(AppConfiguration);
   await app.listen(cfg.port, '0.0.0.0');
   app.get(Logger).log(`inventory listening on :${cfg.port}`, 'Bootstrap');

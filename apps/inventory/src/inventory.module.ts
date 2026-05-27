@@ -1,6 +1,8 @@
 import { ConfigifyModule } from '@itgorillaz/configify';
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import {
   AppLoggerModule,
   KafkaConsumerService,
@@ -9,7 +11,7 @@ import {
   ORDERS_TOPIC,
 } from '@app/common';
 import { AppConfiguration } from './app.configuration';
-import { HealthController } from './health.controller';
+import { HealthController, SERVICE_NAME } from './health.controller';
 import { InventoryConsumer } from './inventory.consumer';
 import { InventoryController } from './inventory.controller';
 import { InventoryReaper } from './inventory.reaper';
@@ -20,6 +22,7 @@ import { InventoryService } from './inventory.service';
     AppLoggerModule,
     ConfigifyModule.forRootAsync(),
     ScheduleModule.forRoot(),
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 60 }]),
     PgModule.forRootAsync({
       inject: [AppConfiguration],
       useFactory: (cfg: AppConfiguration) => ({
@@ -33,6 +36,8 @@ import { InventoryService } from './inventory.service';
   ],
   controllers: [HealthController, InventoryController],
   providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: SERVICE_NAME, useValue: 'inventory' },
     InventoryService,
     InventoryConsumer,
     InventoryReaper,

@@ -1,7 +1,9 @@
 import { ConfigifyModule } from '@itgorillaz/configify';
 import { HttpModule } from '@nestjs/axios';
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import {
   AppLoggerModule,
   KafkaProducerService,
@@ -11,7 +13,7 @@ import {
 import { AppConfiguration } from './app.configuration';
 import { InventoryClient } from './clients/inventory.client';
 import { PaymentsClient } from './clients/payments.client';
-import { HealthController } from './health.controller';
+import { HealthController, SERVICE_NAME } from './health.controller';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
 import { OutboxPublisher } from './outbox.publisher';
@@ -22,6 +24,7 @@ import { SagaRecoveryService } from './saga-recovery.service';
     AppLoggerModule,
     ConfigifyModule.forRootAsync(),
     ScheduleModule.forRoot(),
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 60 }]),
     HttpModule,
     PgModule.forRootAsync({
       inject: [AppConfiguration],
@@ -36,6 +39,8 @@ import { SagaRecoveryService } from './saga-recovery.service';
   ],
   controllers: [HealthController, OrdersController],
   providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: SERVICE_NAME, useValue: 'orders' },
     OrdersService,
     InventoryClient,
     PaymentsClient,

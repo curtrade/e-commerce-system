@@ -1,14 +1,15 @@
-import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { bootstrapService } from '@app/common';
 import { Logger } from 'nestjs-pino';
-import { PaymentsModule } from './payments.module';
 import { AppConfiguration } from './app.configuration';
+import { PaymentsModule } from './payments.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(PaymentsModule, { bufferLogs: true });
-  app.useLogger(app.get(Logger));
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-  app.enableShutdownHooks();
+  const app = await bootstrapService(PaymentsModule, {
+    swagger: {
+      title: 'Payments Service',
+      description: 'Идемпотентный charge/refund с Redis-кэшем и ON CONFLICT',
+    },
+  });
   const cfg = app.get(AppConfiguration);
   await app.listen(cfg.port, '0.0.0.0');
   app.get(Logger).log(`payments listening on :${cfg.port}`, 'Bootstrap');

@@ -20,7 +20,7 @@ export const AppLoggerModule = LoggerModule.forRoot({
     // /health и /healthz регулярно дёргают k8s/docker — не засоряем логи.
     autoLogging: {
       ignore: (req) => {
-        const url = (req as IncomingMessage).url ?? '';
+        const url = req.url ?? '';
         return url === '/health' || url === '/healthz';
       },
     },

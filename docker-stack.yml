@@ -1,0 +1,227 @@
+# Docker Swarm stack — application services only.
+# Infrastructure (Postgres, Redis, Kafka, OTEL collector) is external.
+#
+# Sensitive values are injected via Docker Swarm Secrets (see secrets: below).
+# The entrypoint reads /run/secrets/<name> and exports as env vars.
+#
+# Non-sensitive config is passed via env vars.
+# On the server: /opt/ecommerce/.env (IMAGE_PREFIX, IMAGE_TAG, OTEL_ENDPOINT, etc.)
+#
+# Initial setup:
+#   1. Create /opt/ecommerce/.env.secrets with DATABASE_URL_*, REDIS_URL_*, KAFKA_BROKERS
+#   2. Run: scripts/create-swarm-secrets.sh /opt/ecommerce/.env.secrets
+#   3. Deploy: docker stack deploy -c docker-stack.yml --with-registry-auth ecommerce
+
+services:
+  orders:
+    image: ${IMAGE_PREFIX}-orders:${IMAGE_TAG:-latest}
+    secrets:
+      - source: database_url_orders
+        target: database_url
+      - source: redis_url_orders
+        target: redis_url
+      - source: kafka_brokers
+        target: kafka_brokers
+    environment:
+      PORT: "3000"
+      INVENTORY_URL: http://inventory:3000
+      PAYMENTS_URL: http://payments:3000
+      RESERVATION_TTL_SEC: ${RESERVATION_TTL_SEC:-900}
+      SAGA_TIMEOUT_SEC: ${SAGA_TIMEOUT_SEC:-60}
+      OTEL_SERVICE_NAME: orders
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_ENDPOINT}
+      NODE_OPTIONS: --require=/app/tracing.js
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    networks:
+      - backend
+    ports:
+      - target: 3000
+        published: 3001
+        mode: ingress
+    deploy:
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 10
+        window: 120s
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  payments:
+    image: ${IMAGE_PREFIX}-payments:${IMAGE_TAG:-latest}
+    secrets:
+      - source: database_url_payments
+        target: database_url
+      - source: redis_url_payments
+        target: redis_url
+    environment:
+      PORT: "3000"
+      FAILURE_RATE: "0"
+      OTEL_SERVICE_NAME: payments
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_ENDPOINT}
+      NODE_OPTIONS: --require=/app/tracing.js
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    networks:
+      - backend
+    deploy:
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 10
+        window: 120s
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  inventory:
+    image: ${IMAGE_PREFIX}-inventory:${IMAGE_TAG:-latest}
+    secrets:
+      - source: database_url_inventory
+        target: database_url
+      - source: redis_url_inventory
+        target: redis_url
+      - source: kafka_brokers
+        target: kafka_brokers
+    environment:
+      PORT: "3000"
+      OTEL_SERVICE_NAME: inventory
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_ENDPOINT}
+      NODE_OPTIONS: --require=/app/tracing.js
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    networks:
+      - backend
+    deploy:
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 10
+        window: 120s
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  notifications:
+    image: ${IMAGE_PREFIX}-notifications:${IMAGE_TAG:-latest}
+    secrets:
+      - source: database_url_notifications
+        target: database_url
+      - source: redis_url_notifications
+        target: redis_url
+      - source: kafka_brokers
+        target: kafka_brokers
+    environment:
+      PORT: "3000"
+      SENDER_EMAIL: ${SENDER_EMAIL:-ops@example.com}
+      OTEL_SERVICE_NAME: notifications
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_ENDPOINT}
+      NODE_OPTIONS: --require=/app/tracing.js
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    networks:
+      - backend
+    deploy:
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 10
+        window: 120s
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+secrets:
+  database_url_orders:
+    external: true
+  database_url_payments:
+    external: true
+  database_url_inventory:
+    external: true
+  database_url_notifications:
+    external: true
+  redis_url_orders:
+    external: true
+  redis_url_payments:
+    external: true
+  redis_url_inventory:
+    external: true
+  redis_url_notifications:
+    external: true
+  kafka_brokers:
+    external: true
+
+networks:
+  backend:
+    driver: overlay
+    attachable: true

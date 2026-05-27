@@ -16,13 +16,19 @@ function makeKnownError(
   });
 }
 
-function makeUnknownError(message = 'unknown prisma error'): PrismaClientUnknownRequestError {
+function makeUnknownError(
+  message = 'unknown prisma error',
+): PrismaClientUnknownRequestError {
   return new PrismaClientUnknownRequestError(message, {
     clientVersion: '6.0.0',
   });
 }
 
-function makeHost(type = 'http'): { host: ArgumentsHost; json: jest.Mock; status: jest.Mock } {
+function makeHost(type = 'http'): {
+  host: ArgumentsHost;
+  json: jest.Mock;
+  status: jest.Mock;
+} {
   const json = jest.fn();
   const status = jest.fn().mockReturnValue({ json });
   const host = {
@@ -48,7 +54,10 @@ describe('PrismaExceptionFilter', () => {
 
     expect(status).toHaveBeenCalledWith(HttpStatus.CONFLICT);
     expect(json).toHaveBeenCalledWith(
-      expect.objectContaining({ statusCode: 409, message: 'Resource already exists' }),
+      expect.objectContaining({
+        statusCode: 409,
+        message: 'Resource already exists',
+      }),
     );
   });
 
@@ -58,7 +67,10 @@ describe('PrismaExceptionFilter', () => {
 
     expect(status).toHaveBeenCalledWith(HttpStatus.NOT_FOUND);
     expect(json).toHaveBeenCalledWith(
-      expect.objectContaining({ statusCode: 404, message: 'Resource not found' }),
+      expect.objectContaining({
+        statusCode: 404,
+        message: 'Resource not found',
+      }),
     );
   });
 
@@ -68,7 +80,10 @@ describe('PrismaExceptionFilter', () => {
 
     expect(status).toHaveBeenCalledWith(HttpStatus.BAD_REQUEST);
     expect(json).toHaveBeenCalledWith(
-      expect.objectContaining({ statusCode: 400, message: 'Related resource missing' }),
+      expect.objectContaining({
+        statusCode: 400,
+        message: 'Related resource missing',
+      }),
     );
   });
 
@@ -88,7 +103,10 @@ describe('PrismaExceptionFilter', () => {
     filter.catch(makeKnownError('P2024', 'timeout exceeded'), host);
 
     expect(status).toHaveBeenCalledWith(HttpStatus.INTERNAL_SERVER_ERROR);
-    expect(json).toHaveBeenCalledWith({ statusCode: 500, message: 'Database error' });
+    expect(json).toHaveBeenCalledWith({
+      statusCode: 500,
+      message: 'Database error',
+    });
     expect(logSpy).toHaveBeenCalledWith(
       expect.stringContaining('P2024'),
       expect.anything(),
@@ -101,7 +119,10 @@ describe('PrismaExceptionFilter', () => {
     filter.catch(makeUnknownError('connection reset'), host);
 
     expect(status).toHaveBeenCalledWith(HttpStatus.INTERNAL_SERVER_ERROR);
-    expect(json).toHaveBeenCalledWith({ statusCode: 500, message: 'Database error' });
+    expect(json).toHaveBeenCalledWith({
+      statusCode: 500,
+      message: 'Database error',
+    });
     expect(logSpy).toHaveBeenCalledWith(
       expect.stringContaining('connection reset'),
       expect.anything(),

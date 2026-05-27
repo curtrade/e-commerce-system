@@ -16,6 +16,9 @@ exporters:
   # Logs → Loki по нативному OTLP-приёмнику (Loki 3.x: /otlp/v1/logs).
   otlphttp/loki:
     endpoint: http://loki:3100/otlp
+  # Metrics → Prometheus scrape endpoint.
+  prometheus:
+    endpoint: 0.0.0.0:9464
 
 service:
   pipelines:
@@ -27,3 +30,7 @@ service:
       receivers: [otlp]
       processors: [batch]
       exporters: [otlphttp/loki]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [prometheus]

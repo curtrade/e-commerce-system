@@ -6,15 +6,18 @@ import {
   HttpCode,
   Post,
 } from '@nestjs/common';
+import { ApiHeader, ApiTags } from '@nestjs/swagger';
 import { CommitDto, ReleaseDto, ReserveDto } from './dto/reserve.dto';
 import { InventoryService } from './inventory.service';
 
+@ApiTags('inventory')
 @Controller('inventory')
 export class InventoryController {
   constructor(private readonly inventory: InventoryService) {}
 
   @Post('reserve')
   @HttpCode(201)
+  @ApiHeader({ name: 'idempotency-key', required: true })
   reserve(
     @Body() dto: ReserveDto,
     @Headers('idempotency-key') idemKey?: string,

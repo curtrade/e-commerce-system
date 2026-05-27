@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.7
 # Single multi-stage Dockerfile for all four Nest apps in this monorepo.
 # Pass --build-arg SERVICE=orders|payments|inventory|notifications.
 
@@ -31,8 +30,6 @@ RUN mkdir -p /app/_prisma && \
     if [ -d "apps/${SERVICE}/prisma" ]; then \
       cp -r "apps/${SERVICE}/prisma/." /app/_prisma/; \
     fi
-# Stash prisma CLI before pruning (used by migrate stage only).
-RUN cp -r node_modules/prisma /tmp/prisma-cli
 RUN npm prune --omit=dev
 
 # --- migrate --------------------------------------------------------------
@@ -42,8 +39,7 @@ FROM node:${NODE_VERSION} AS migrate
 ARG SERVICE
 WORKDIR /app
 RUN addgroup -g 1001 -S app && adduser -S app -u 1001
-COPY --from=build --chown=app:app /app/node_modules ./node_modules
-COPY --from=build --chown=app:app /tmp/prisma-cli ./node_modules/prisma
+COPY --from=deps --chown=app:app /app/node_modules ./node_modules
 COPY --from=build --chown=app:app /app/_prisma ./_prisma
 COPY --from=build --chown=app:app /app/package.json ./
 USER app
@@ -61,7 +57,9 @@ COPY --from=build --chown=app:app /app/dist ./dist
 COPY --from=build --chown=app:app /app/_prisma ./_prisma
 COPY --from=build --chown=app:app /app/tracing.js ./
 COPY --from=build --chown=app:app /app/package.json ./
+COPY --chown=app:app scripts/docker-entrypoint.sh ./
+RUN chmod +x docker-entrypoint.sh
 USER app
 EXPOSE 3000
-# Nest monorepo emits to dist/apps/<svc>/apps/<svc>/src/main.js (paths preserved from baseUrl).
+ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["sh", "-c", "node dist/apps/${SERVICE_NAME}/apps/${SERVICE_NAME}/src/main.js"]
