@@ -69,3 +69,13 @@ jobs:
       - run: npm ci
       - run: npm run prisma:generate
       - run: npm run test:e2e
+      - name: Dump docker logs on failure
+        if: failure()
+        run: docker compose logs --tail=200 > docker-logs.txt 2>&1
+      - name: Upload docker logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-logs
+          path: docker-logs.txt
+          retention-days: 7

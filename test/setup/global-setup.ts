@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { Client } from 'pg';
 import {
@@ -17,20 +17,22 @@ const REPO_ROOT = join(__dirname, '..', '..');
 const SERVICES = ['orders', 'payments', 'inventory', 'notifications'] as const;
 type Service = (typeof SERVICES)[number];
 
-function extractSchema(service: Service): string {
-  const sql = readFileSync(join(REPO_ROOT, 'scripts', 'init-db.sql'), 'utf8');
-  // Sections in init-db.sql start with `\c <service>` and end either at the
-  // next `-- =` separator or at end of file (notifications is last).
-  const re = new RegExp(
-    String.raw`\\c\s+${service}\s+([\s\S]*?)(?=\n--\s*=|$)`,
-  );
-  const m = sql.match(re);
-  if (!m) throw new Error(`No schema for ${service} in scripts/init-db.sql`);
-  return m[1];
+function loadMigrations(service: Service): string {
+  const migrationsDir = join(REPO_ROOT, 'apps', service, 'prisma', 'migrations');
+  const dirs = readdirSync(migrationsDir, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name)
+    .sort();
+
+  return dirs
+    .map((dir) => {
+      const sqlPath = join(migrationsDir, dir, 'migration.sql');
+      return readFileSync(sqlPath, 'utf8');
+    })
+    .join('\n');
 }
 
 function dsnFor(baseUri: string, db: string): string {
-  // PostgreSqlContainer.getConnectionUri() returns .../test by default.
   return baseUri.replace(/\/[^/]+$/, '/' + db);
 }
 
@@ -44,7 +46,6 @@ export default async function globalSetup(): Promise<void> {
 
   const bootstrapUri = pg.getConnectionUri();
 
-  // Create per-service databases from the bootstrap connection.
   const root = new Client({ connectionString: bootstrapUri });
   await root.connect();
   try {
@@ -55,12 +56,11 @@ export default async function globalSetup(): Promise<void> {
     await root.end();
   }
 
-  // Apply each schema fragment to its own DB.
   for (const db of SERVICES) {
     const client = new Client({ connectionString: dsnFor(bootstrapUri, db) });
     await client.connect();
     try {
-      await client.query(extractSchema(db));
+      await client.query(loadMigrations(db));
     } finally {
       await client.end();
     }
