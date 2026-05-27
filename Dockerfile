@@ -30,8 +30,6 @@ RUN mkdir -p /app/_prisma && \
     if [ -d "apps/${SERVICE}/prisma" ]; then \
       cp -r "apps/${SERVICE}/prisma/." /app/_prisma/; \
     fi
-# Stash prisma CLI before pruning (used by migrate stage only).
-RUN cp -r node_modules/prisma /tmp/prisma-cli
 RUN npm prune --omit=dev
 
 # --- migrate --------------------------------------------------------------
@@ -41,8 +39,7 @@ FROM node:${NODE_VERSION} AS migrate
 ARG SERVICE
 WORKDIR /app
 RUN addgroup -g 1001 -S app && adduser -S app -u 1001
-COPY --from=build --chown=app:app /app/node_modules ./node_modules
-COPY --from=build --chown=app:app /tmp/prisma-cli ./node_modules/prisma
+COPY --from=deps --chown=app:app /app/node_modules ./node_modules
 COPY --from=build --chown=app:app /app/_prisma ./_prisma
 COPY --from=build --chown=app:app /app/package.json ./
 USER app
