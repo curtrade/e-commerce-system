@@ -146,6 +146,7 @@ jobs:
   deploy-staging:
     name: Deploy → Staging
     needs: [changes, build]
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: staging
     steps:
@@ -182,6 +183,7 @@ jobs:
   deploy-prod:
     name: Deploy → Production
     needs: [changes, build, deploy-staging]
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: production
     steps:
